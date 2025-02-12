@@ -1,0 +1,10 @@
+---
+Checks:
+  [
+    "bugprone-*",
+    "clang-analyzer-*",
+    "google-*",
+    "performance-*",
+    "portability-*",
+    "readability-*",
+  ]
