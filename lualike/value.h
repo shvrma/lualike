@@ -2,50 +2,64 @@
 #define LUALIKE_VALUE_H_
 
 #include <cstdint>
-#include <ostream>
+#include <expected>
+#include <optional>
 #include <string>
 #include <variant>
 
 namespace lualike::value {
 
-enum class LuaValueType : uint8_t {
+// Specifies the type of a value stored in LuaValue type
+enum class LuaValueKind : uint8_t {
   kNil,
-  kBoolean,
-  kInteger,
+  kBool,
+  kInt,
   kFloat,
   kString,
-  // kFunction,
-  // kUserdata,
-  // kThread,
-  // kTable,
 };
 
-class LuaValue {
-  using LuaNilInnerType = std::monostate;
-  using LuaBoolInnerType = bool;
-  using LuaIntInnerType = int64_t;
-  using LuaFloatInnerType = double;
-  using LuaStringInnerType = std::string;
+using LuaNilInnerType = std::monostate;
+using LuaBoolInnerType = bool;
+using LuaIntInnerType = int64_t;
+using LuaFloatInnerType = double;
+using LuaStringInnerType = std::string;
 
+enum class ArithmeticOpErr : uint8_t { kLhsNotNumeric, kRhsNotNumeric };
+
+enum class TryMakeErr : uint8_t {
+  kOutOfRange,
+  kInvalidInput,
+};
+
+// Represents a single value within lualike
+//
+// Note: there are no other types for this purpose as it stores value by itself,
+// not looking at its data type. You can check the kind of a VALUE inside by
+// calling GetValueKind().
+class LuaValue {
   std::variant<LuaNilInnerType, LuaBoolInnerType, LuaIntInnerType,
                LuaFloatInnerType, LuaStringInnerType>
-      value_;
+      inner_value_;
 
-  explicit constexpr LuaValue(decltype(value_) &&value) noexcept;
+  explicit constexpr LuaValue(decltype(inner_value_) &&value) noexcept;
+  explicit constexpr LuaValue() noexcept;
+
+  using ArithmeticOpResult = std::expected<LuaValue, ArithmeticOpErr>;
+  using TryMakeResult = std::expected<LuaValue, TryMakeErr>;
+
+  ArithmeticOpResult PerformArithmeticOp(const LuaValue &rhs,
+                                         auto operation) const noexcept;
+
+  template <typename InnerT>
+  static TryMakeResult TryMakeLuaNum(std::string_view input);
 
  public:
-  explicit LuaValue() noexcept;
-
-  LuaValueType GetValueType() const noexcept;
+  LuaValueKind GetValueKind() const noexcept;
   std::string ToString() const noexcept;
 
-  enum class TryMakeErr : uint8_t {
-    kOutOfRange,
-    kInvalidInput,
-  };
-  using TryMakeResult = std::variant<LuaValue, TryMakeErr>;
   static TryMakeResult TryMakeLuaInteger(std::string_view input) noexcept;
   static TryMakeResult TryMakeLuaFloat(std::string_view input) noexcept;
+  std::optional<LuaValue> TryConvertToFloat() const noexcept;
 
   static LuaValue MakeLuaNil() noexcept;
   static LuaValue MakeLuaString(std::string_view input) noexcept;
@@ -54,26 +68,20 @@ class LuaValue {
 
   bool operator==(const LuaValue &rhs) const noexcept = default;
 
-  LuaValue operator+(const LuaValue &rhs) const noexcept;
-  LuaValue operator-(const LuaValue &rhs) const noexcept;
-  LuaValue operator/(const LuaValue &rhs) const noexcept;
-  LuaValue operator*(const LuaValue &rhs) const noexcept;
-
-  LuaValue operator+=(const LuaValue &rhs) noexcept;
-  LuaValue operator-=(const LuaValue &rhs) noexcept;
-  LuaValue operator/=(const LuaValue &rhs) noexcept;
-  LuaValue operator*=(const LuaValue &rhs) noexcept;
+  ArithmeticOpResult operator+(const LuaValue &rhs) const noexcept;
+  ArithmeticOpResult operator-(const LuaValue &rhs) const noexcept;
+  ArithmeticOpResult operator*(const LuaValue &rhs) const noexcept;
+  ArithmeticOpResult operator/(const LuaValue &rhs) const noexcept;
+  ArithmeticOpResult FloorDivide(const LuaValue &rhs) const noexcept;
+  ArithmeticOpResult operator%(const LuaValue &rhs) const noexcept;
+  // Not a binary XOR but exponantiation operation
+  ArithmeticOpResult operator^(const LuaValue &rhs) const noexcept;
 
   friend LuaValue operator""_lua_int(unsigned long long int value);
   friend LuaValue operator""_lua_float(long double value);
-  friend LuaValue operator""_lua_str(const char *str, std::size_t len) noexcept;
-
-  friend void PrintTo(const LuaValue &value, std::ostream *output);
+  friend LuaValue operator""_lua_str(const char *string,
+                                     std::size_t length) noexcept;
 };
-
-LuaValue operator""_lua_int(unsigned long long int value);
-LuaValue operator""_lua_float(long double value);
-LuaValue operator""_lua_str(const char *str, std::size_t len) noexcept;
 
 }  // namespace lualike::value
 
