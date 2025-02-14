@@ -25,6 +25,6 @@ std::cout << evaluated_value.ToString();
 
 ## Literature used
 
-<https://compilers.iecc.com/crenshaw/>
-<https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing>
-<https://cs.stanford.edu/people/eroberts/courses/soco/projects/2004-05/automata-theory/basics.html>
+- <https://compilers.iecc.com/crenshaw/>
+- <https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing>
+- <https://cs.stanford.edu/people/eroberts/courses/soco/projects/2004-05/automata-theory/basics.html>
