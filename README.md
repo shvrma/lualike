@@ -1,6 +1,6 @@
 # lualike
 
-A intrpreter for Lua language subset.
+An interpreter with a syntax resembling Lua's one.
 
 There is a lot still to do. Currently it only evaluates expressions made up of literals and simple arithemtic operator (sum, difference, product, quotient).
 
@@ -23,7 +23,7 @@ std::cout << evaluated_value.ToString();
 
 ```
 
-## Reference
+## Literature used
 
 [https://compilers.iecc.com/crenshaw/]
 [https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing]
