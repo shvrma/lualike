@@ -6,7 +6,7 @@ There is a lot still to do. Currently it only evaluates expressions made up of l
 
 ## Usage
 
-'lualike::interpreter::Interpreter' is the enter point whose constructor accepts a reference to char stream which forms a expression to be evaluated.
+`lualike::interpreter::Interpreter` is the enter point whose constructor accepts a reference to char stream which forms a expression to be evaluated.
 
 Usage example:
 
@@ -25,6 +25,6 @@ std::cout << evaluated_value.ToString();
 
 ## Literature used
 
-[https://compilers.iecc.com/crenshaw/]
-[https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing]
-[https://cs.stanford.edu/people/eroberts/courses/soco/projects/2004-05/automata-theory/basics.html]
+<https://compilers.iecc.com/crenshaw/>
+<https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing>
+<https://cs.stanford.edu/people/eroberts/courses/soco/projects/2004-05/automata-theory/basics.html>
