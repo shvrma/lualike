@@ -2,77 +2,68 @@
 #define LUALIKE_LEXER_H_
 
 #include <cstdint>
+#include <expected>
+#include <ranges>
 #include <string>
-#include <variant>
 
 #include "token.h"
 
 namespace lualike::lexer {
 
-enum class LexerErr : uint8_t {
+enum class LexerErrKind : uint8_t {
   kEOF,
   kInvalidSymbolMet,
-  kInputNotOk,
-  kTooLongToken
+  kTooLongToken,
+  kUnclosedStringLiteral,
+  kUnrecognizedEscapeSequence,
+  kExpectedDigit,
 };
 
-struct ConsumeWhitespaceLexerState {};
+struct LexerErr : std::exception {
+  LexerErrKind error_kind;
 
-struct ReadAlphanumericLexerState {};
-
-struct ReadOtherTokenLexerState {};
-
-struct ReadShortLiteralStringLexerState {
-  char delimiter;
-  bool is_escaped = false;
+  explicit LexerErr(LexerErrKind error_kind) noexcept;
 };
 
-struct ReadNumericConstantLexerState {
-  bool has_met_fractional_part = false;
-};
+template <typename LexerInputRangeT>
+concept LexerInputRangeTRequirements =
+    std::ranges::input_range<LexerInputRangeT> &&
+    std::same_as<char, std::ranges::range_value_t<LexerInputRangeT>>;
 
-struct ConsumeCommentLexerState {};
-
-struct ReturnTokenLexerState {
-  token::Token token;
-  bool should_consume_current = false;
-};
-
-struct ReturnErrorLexerState {
-  LexerErr error;
-};
-
-using LexerState =
-    std::variant<std::monostate,
-
-                 ConsumeWhitespaceLexerState, ReadAlphanumericLexerState,
-                 ReadOtherTokenLexerState, ReadShortLiteralStringLexerState,
-                 ReadNumericConstantLexerState, ConsumeCommentLexerState,
-
-                 ReturnTokenLexerState, ReturnErrorLexerState>;
-
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
 class Lexer {
-  std::string output_accumulator_;
+  std::ranges::iterator_t<LexerInputRangeT> iter_;
+  std::ranges::sentinel_t<LexerInputRangeT> sentinel_;
+
+  std::string token_data_accumulator_;
   static constexpr int kMaxOutputAccumLength = 16;
 
-  LexerState state_;
-
-  inline LexerState ConsumeWhitespace(
-      char symbol, ConsumeWhitespaceLexerState &state) noexcept;
-  inline LexerState ReadAlphanumeric(
-      char symbol, ReadAlphanumericLexerState &state) noexcept;
-  inline LexerState ReadOtherToken(char symbol,
-                                   ReadOtherTokenLexerState &state) noexcept;
-  inline LexerState ReadShortLiteralString(
-      char symbol, ReadShortLiteralStringLexerState &state) noexcept;
-  inline LexerState ReadNumericConstant(
-      char symbol, ReadNumericConstantLexerState &state) noexcept;
-  inline LexerState ConsumeComment(char symbol,
-                                   ConsumeCommentLexerState &state) noexcept;
+  // Initial call during token reading.
+  // Pre: valid initial state of Lexer.
+  token::Token ConsumeWhitespace();
+  // Pre: single alphabetic symbol or undescore in accumulator.
+  token::Token ReadAlphanumeric();
+  // Pre: single symbol from alphabet of other tokens -
+  // token::kOtherTokensAlphabet - in accumalator.
+  token::Token ReadOtherToken();
+  // Pre: accumulator is empty and delimiter is got
+  token::Token ReadShortLiteralString(char delimiter);
+  // Pre: single digit is in accumulator.
+  token::Token ReadNumericConstant();
+  // No precondition.
+  token::Token ConsumeComment();
 
  public:
-  using ReadTokenResult = std::variant<token::Token, LexerErr>;
-  ReadTokenResult ReadToken(std::istream &input_stream) noexcept;
+  explicit Lexer(LexerInputRangeT &&input_range) noexcept;
+
+  // Iterates the contained ranged of symbols till syntatically valid token is
+  // found, then returning it. In case of EOF returns token whose token_kind
+  // field is set to token::TokenKind::kNone.
+  //
+  // Supposedly, the input should be valid. Lexer recognizes errors, but in the
+  // case of recognition, a LexerErr is thrown.
+  token::Token ReadToken();
 };
 
 }  // namespace lualike::lexer

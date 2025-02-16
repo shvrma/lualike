@@ -42,11 +42,7 @@ struct LualikeValue {
   using FloatT = double;
   using StringT = std::string;
 
-  std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value;
-
-  explicit constexpr LualikeValue(decltype(inner_value) &&value) noexcept;
-  // Construct value such as its type is nil.
-  explicit constexpr LualikeValue() noexcept;
+  std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value = NilT{};
 
   LualikeValueType GetValueType() const noexcept;
   std::string ToString() const noexcept;

@@ -19,12 +19,6 @@ static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
 LualikeValueOpErr::LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept
     : error_kind(error_kind) {}
 
-constexpr LualikeValue::LualikeValue(decltype(inner_value) &&value) noexcept
-    : inner_value(value) {}
-
-constexpr LualikeValue::LualikeValue() noexcept
-    : inner_value(LualikeValue::NilT{}) {}
-
 inline LualikeValueType LualikeValue::GetValueType() const noexcept {
   const auto visitor = [](auto &&value) -> LualikeValueType {
     using T = std::decay_t<decltype(value)>;

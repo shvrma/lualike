@@ -1,18 +1,17 @@
 #include "lexer.h"
 
 #include <algorithm>
-#include <istream>
 #include <iterator>
-#include <ranges>
 
 #include "token.h"
+#include "value.h"
 
 namespace lualike::lexer {
 
 using token::Token;
 using token::TokenKind;
 
-using value::LuaValue;
+using value::LualikeValue;
 
 namespace {
 
@@ -24,7 +23,9 @@ struct Vertex {
   constexpr Vertex() noexcept { std::ranges::fill(Vertex::next, -1); }
 };
 
-constexpr auto kKeywordsTrie = []() consteval {
+}  // namespace
+
+static constexpr auto kKeywordsTrie = []() consteval {
   constexpr int kAlphabetSize = 26;
 
   constexpr auto calc = [](auto trie) {
@@ -58,16 +59,16 @@ constexpr auto kKeywordsTrie = []() consteval {
   return calc(std::array<Vertex<kAlphabetSize>, kTrieSize>{}).first;
 }();
 
-constexpr int kOtherTokensMaxLength = std::ranges::max(
+static constexpr int kOtherTokensMaxLength = std::ranges::max(
     token::kOtherTokensMap | std::views::keys |
     std::views::transform([](const auto str) { return str.length(); }));
 
-constexpr auto kOtherTokensAlphabet = []() consteval {
+static constexpr auto kOtherTokensAlphabet = []() consteval {
   constexpr auto all_symbols =
       token::kOtherTokensMap | std::views::keys | std::views::join;
 
   constexpr auto calculate = [all_symbols](auto alphabet) {
-    std::input_or_output_iterator auto iter = alphabet.begin();
+    auto iter = alphabet.begin();
 
     for (const char &symbol : all_symbols) {
       if (std::ranges::none_of(
@@ -90,13 +91,13 @@ constexpr auto kOtherTokensAlphabet = []() consteval {
 }();
 
 // Prime numbers list: 11, 13, 17, 19, 23, 29, 31, 37, 41
-constexpr int kModuloDivisitorOfHashFunction = 37;
+static constexpr int kModuloDivisitorOfHashFunction = 37;
 
-constexpr int OtherTokensHashFunc(const char symbol) noexcept {
-  return symbol % kModuloDivisitorOfHashFunction;
+static constexpr int OtherTokensHashFunc(const char symbol) noexcept {
+  return static_cast<int>(symbol) % kModuloDivisitorOfHashFunction;
 }
 
-constexpr auto kOtherTokensTrie = []() consteval {
+static constexpr auto kOtherTokensTrie = []() consteval {
   // Validate hash function
   std::array<int, kOtherTokensAlphabet.size()> hashes{};
   std::ranges::copy(
@@ -145,109 +146,148 @@ constexpr auto kOtherTokensTrie = []() consteval {
       .first;
 }();
 
-inline bool IsSpace(const char symbol) noexcept {
+static inline bool IsSpace(const char symbol) noexcept {
   return symbol == ' ' || symbol == '\f' || symbol == '\n' || symbol == '\r' ||
          symbol == '\t' || symbol == '\v';
 }
 
-inline bool IsAlphabetic(const char symbol) noexcept {
+static inline bool IsAlphabetic(const char symbol) noexcept {
   return (symbol >= 'a' && symbol <= 'z') || (symbol >= 'A' && symbol <= 'Z');
 }
 
-inline bool IsNumeric(const char symbol) noexcept {
+static inline bool IsNumeric(const char symbol) noexcept {
   return (symbol >= '0' && symbol <= '9');
 }
 
-inline bool IsAlphanumeric(const char symbol) noexcept {
+static inline bool IsAlphanumeric(const char symbol) noexcept {
   return IsAlphabetic(symbol) || IsNumeric(symbol);
 }
 
-inline bool IsOther(const char symbol) noexcept {
+static inline bool IsOther(const char symbol) noexcept {
   return std::ranges::find(kOtherTokensAlphabet, symbol) !=
          std::ranges::end(kOtherTokensAlphabet);
 }
 
-}  // namespace
+LexerErr::LexerErr(LexerErrKind error_kind) noexcept : error_kind(error_kind) {}
 
-LexerState Lexer::ConsumeWhitespace(
-    const char symbol, ConsumeWhitespaceLexerState &state) noexcept {
-  if (IsSpace(symbol)) {
-    return state;
-  }
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Lexer<LexerInputRangeT>::Lexer(LexerInputRangeT &&input_range) noexcept
+    : iter_(input_range.begin()), sentinel_(input_range.end()) {}
 
-  Lexer::output_accumulator_ = {};
-
-  if (symbol == '_' || IsAlphabetic(symbol)) {
-    Lexer::output_accumulator_ += symbol;
-    return ReadAlphanumericLexerState{};
-  }
-
-  if (IsOther(symbol)) {
-    Lexer::output_accumulator_ += symbol;
-    return ReadOtherTokenLexerState{};
-  }
-
-  if (symbol == '\'' || symbol == '\"') {
-    return ReadShortLiteralStringLexerState{
-        .delimiter = symbol,
-    };
-  }
-
-  if (symbol >= '0' && symbol <= '9') {
-    Lexer::output_accumulator_ += symbol;
-    return ReadNumericConstantLexerState{};
-  }
-
-  return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
-}
-
-LexerState Lexer::ReadAlphanumeric(const char symbol,
-                                   ReadAlphanumericLexerState &state) noexcept {
-  if (IsAlphanumeric(symbol) || symbol == '_') {
-    if (Lexer::output_accumulator_.length() == Lexer::kMaxOutputAccumLength) {
-      return ReturnErrorLexerState{.error = LexerErr::kTooLongToken};
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Token Lexer<LexerInputRangeT>::ConsumeWhitespace() {
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
+    if (IsSpace(symbol)) {
+      continue;
     }
 
-    Lexer::output_accumulator_ += symbol;
-    return state;
+    Lexer::token_data_accumulator_ = {};
+
+    if (symbol == '_' || IsAlphabetic(symbol)) {
+      Lexer::token_data_accumulator_ += symbol;
+      return Lexer::ReadAlphanumeric();
+    }
+
+    if (IsOther(symbol)) {
+      Lexer::token_data_accumulator_ += symbol;
+      return ReadOtherToken();
+    }
+
+    if (symbol == '\'' || symbol == '\"') {
+      return Lexer::ReadShortLiteralString(symbol);
+    }
+
+    if (symbol >= '0' && symbol <= '9') {
+      Lexer::token_data_accumulator_ += symbol;
+      return ReadNumericConstant();
+    }
+
+    throw LexerErr(LexerErrKind::kInvalidSymbolMet);
   }
 
-  if (IsSpace(symbol) || IsOther(symbol)) {
-    const auto match_result = [&state, this] {
-      int vertex_idx = 0;
-
-      for (const char symbol : Lexer::output_accumulator_) {
-        if (symbol < 'a' || symbol > 'z') {
-          return TokenKind::kNone;
-        }
-
-        vertex_idx = kKeywordsTrie.at(vertex_idx).next.at(symbol - 'a');
-
-        if (vertex_idx == -1) {
-          return TokenKind::kNone;
-        }
-      }
-
-      return kKeywordsTrie.at(vertex_idx).output;
-    }();
-
-    return ReturnTokenLexerState{
-        .token = (match_result != TokenKind::kNone)
-                     ? Token{.token_kind = match_result}
-                     : Token{.token_kind = TokenKind::kName,
-                             .token_data = LuaValue::MakeLuaString(
-                                 std::move(Lexer::output_accumulator_))}};
-  }
-
-  return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
+  // EOF.
+  return {.token_kind = TokenKind::kNone};
 }
 
-LexerState Lexer::ReadOtherToken(const char symbol,
-                                 ReadOtherTokenLexerState &state) noexcept {
-  const auto try_match = [&state, this] {
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Token Lexer<LexerInputRangeT>::ReadAlphanumeric() {
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
+
+    if (IsAlphanumeric(symbol) || symbol == '_') {
+      if (Lexer::token_data_accumulator_.length() ==
+          Lexer::kMaxOutputAccumLength) {
+        throw LexerErr(LexerErrKind::kTooLongToken);
+      }
+
+      Lexer::token_data_accumulator_ += symbol;
+      continue;
+    }
+
+    if (IsSpace(symbol) || IsOther(symbol)) {
+      break;
+    }
+
+    throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+  }
+
+  const auto match_result = [this] {
+    int vertex_idx = 0;
+
+    for (const char symbol : Lexer::token_data_accumulator_) {
+      if (symbol < 'a' || symbol > 'z') {
+        return TokenKind::kNone;
+      }
+
+      vertex_idx = kKeywordsTrie.at(vertex_idx).next.at(symbol - 'a');
+
+      if (vertex_idx == -1) {
+        return TokenKind::kNone;
+      }
+    }
+
+    return kKeywordsTrie.at(vertex_idx).output;
+  }();
+
+  if (match_result != TokenKind::kNone) {
+    switch (match_result) {
+      case TokenKind::kKeywordNil:
+        return Token{.token_kind = TokenKind::kKeywordNil,
+                     .token_data = {{.inner_value = LualikeValue::NilT{}}}};
+
+      case TokenKind::kKeywordTrue:
+        return Token{
+            .token_kind = TokenKind::kKeywordTrue,
+            .token_data = {{.inner_value = LualikeValue::BoolT{true}}}};
+
+      case TokenKind::kKeywordFalse:
+        return Token{
+            .token_kind = TokenKind::kKeywordFalse,
+            .token_data = {{.inner_value = LualikeValue::BoolT{false}}}};
+
+      default:
+        return Token{.token_kind = TokenKind::kKeywordFalse};
+    }
+  }
+
+  else {
+    return Token{.token_kind = TokenKind::kName,
+                 .token_data = {{LualikeValue::StringT{
+                     std::move(Lexer::token_data_accumulator_)}}}};
+  }
+}
+
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Token Lexer<LexerInputRangeT>::ReadOtherToken() {
+  const auto try_match = [this] {
     auto vertex_idx = 0;
 
-    for (const char symbol : Lexer::output_accumulator_) {
+    for (const char symbol : Lexer::token_data_accumulator_) {
       vertex_idx =
           kOtherTokensTrie.at(vertex_idx).next.at(OtherTokensHashFunc(symbol));
 
@@ -259,241 +299,262 @@ LexerState Lexer::ReadOtherToken(const char symbol,
     return kOtherTokensTrie.at(vertex_idx).output;
   };
 
-  if (IsOther(symbol)) {
-    if (Lexer::output_accumulator_.length() == kOtherTokensMaxLength) {
-      return ReturnErrorLexerState{.error = LexerErr::kTooLongToken};
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
+
+    if (IsOther(symbol)) {
+      if (Lexer::token_data_accumulator_.length() == kOtherTokensMaxLength) {
+        throw LexerErr(LexerErrKind::kTooLongToken);
+      }
+
+      if (Lexer::token_data_accumulator_ == "-" && symbol == '-') {
+        return Lexer::ConsumeComment();
+      }
+
+      // Match current output
+      TokenKind first_match_result = try_match();
+
+      Lexer::token_data_accumulator_ += symbol;
+
+      TokenKind second_match_result = try_match();
+
+      if (first_match_result != TokenKind::kNone &&
+          second_match_result == TokenKind::kNone) {
+        return {.token_kind = first_match_result};
+      }
+
+      continue;
     }
 
-    if (Lexer::output_accumulator_ == "-" && symbol == '-') {
-      return ConsumeCommentLexerState{};
+    if (IsSpace(symbol) || IsAlphanumeric(symbol)) {
+      break;
     }
 
-    // Match current output
-    TokenKind first_match_result = try_match();
-
-    Lexer::output_accumulator_ += symbol;
-
-    TokenKind second_match_result = try_match();
-
-    if (first_match_result != TokenKind::kNone &&
-        second_match_result == TokenKind::kNone) {
-      return ReturnTokenLexerState{.token{.token_kind = first_match_result}};
-    }
-
-    return state;
+    throw LexerErr(LexerErrKind::kInvalidSymbolMet);
   }
 
-  if (IsSpace(symbol) || IsAlphanumeric(symbol)) {
-    TokenKind match_result = try_match();
+  TokenKind match_result = try_match();
 
-    if (match_result != TokenKind::kNone) {
-      return ReturnTokenLexerState{.token{.token_kind = match_result}};
-    }
+  if (match_result != TokenKind::kNone) {
+    return {.token_kind = match_result};
   }
-
-  return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
 }
 
-inline LexerState Lexer::ReadShortLiteralString(
-    const char symbol, ReadShortLiteralStringLexerState &state) noexcept {
-  if (state.is_escaped) {
-    switch (symbol) {
-      case 'a':
-        Lexer::output_accumulator_ += '\a';
-        break;
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Token Lexer<LexerInputRangeT>::ReadShortLiteralString(char delimiter) {
+  bool is_escaped = false;
 
-      case 'b':
-        Lexer::output_accumulator_ += '\b';
-        break;
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
 
-      case 'f':
-        Lexer::output_accumulator_ += '\f';
-        break;
+    if (is_escaped) {
+      switch (symbol) {
+        case 'a':
+          Lexer::token_data_accumulator_ += '\a';
+          break;
 
-      case 'n':
-        Lexer::output_accumulator_ += '\n';
-        break;
+        case 'b':
+          Lexer::token_data_accumulator_ += '\b';
+          break;
 
-      case 'r':
-        Lexer::output_accumulator_ += '\r';
-        break;
+        case 'f':
+          Lexer::token_data_accumulator_ += '\f';
+          break;
 
-      case 't':
-        Lexer::output_accumulator_ += '\t';
-        break;
+        case 'n':
+          Lexer::token_data_accumulator_ += '\n';
+          break;
 
-      case '\\':
-        Lexer::output_accumulator_ += '\\';
-        break;
+        case 'r':
+          Lexer::token_data_accumulator_ += '\r';
+          break;
 
-      case '\"':
-        Lexer::output_accumulator_ += '\"';
-        break;
+        case 't':
+          Lexer::token_data_accumulator_ += '\t';
+          break;
 
-      case '\'':
-        Lexer::output_accumulator_ += '\'';
-        break;
+        case '\\':
+          Lexer::token_data_accumulator_ += '\\';
+          break;
 
-      default:
-        return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
+        case '\"':
+          Lexer::token_data_accumulator_ += '\"';
+          break;
+
+        case '\'':
+          Lexer::token_data_accumulator_ += '\'';
+          break;
+
+        default:
+          throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+      }
+
+      is_escaped = false;
+      continue;
     }
 
-    state.is_escaped = false;
-    return state;
-  }
-
-  if (symbol == '\\') {
-    state.is_escaped = true;
-    return state;
-  }
-
-  // Unescaped newline
-  if (symbol == '\n') {
-    return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
-  }
-
-  if (symbol == state.delimiter) {
-    if (state.is_escaped) {
-      return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
+    if (symbol == '\\') {
+      is_escaped = true;
+      continue;
     }
 
-    return ReturnTokenLexerState{
-        .token{.token_kind = TokenKind::kLiteralString,
-               .token_data = LuaValue::MakeLuaString(
-                   std::move(Lexer::output_accumulator_))},
-        .should_consume_current = true};
+    if (symbol == '\n') {
+      throw LexerErr(LexerErrKind::kUnrecognizedEscapeSequence);
+    }
+
+    if (symbol == delimiter) {
+      Lexer::iter_++;
+      return {.token_kind = TokenKind::kLiteralString,
+              .token_data = {{LualikeValue::StringT{
+                  std::move(Lexer::token_data_accumulator_)}}}};
+    }
+
+    Lexer::token_data_accumulator_ += symbol;
   }
 
-  Lexer::output_accumulator_ += symbol;
-  return state;
+  throw LexerErr(LexerErrKind::kUnclosedStringLiteral);
 }
 
-inline LexerState Lexer::ReadNumericConstant(
-    const char symbol, ReadNumericConstantLexerState &state) noexcept {
-  if (IsNumeric(symbol)) {
-    Lexer::output_accumulator_ += symbol;
-    return state;
-  }
+template <typename LexerInputRangeT>
+  requires LexerInputRangeTRequirements<LexerInputRangeT>
+Token Lexer<LexerInputRangeT>::ReadNumericConstant() {
+  bool has_met_fractional_part = false;
 
-  if (symbol == '.' || symbol == ',') {
-    if (state.has_met_fractional_part) {
-      return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
+
+    if (IsNumeric(symbol)) {
+      Lexer::token_data_accumulator_ += symbol;
+      continue;
     }
 
-    Lexer::output_accumulator_ += symbol;
-    state.has_met_fractional_part = true;
-    return state;
-  }
+    if (symbol == '.' || symbol == ',') {
+      if (has_met_fractional_part) {
+        throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+      }
 
-  if (IsSpace(symbol) || IsOther(symbol)) {
-    const auto try_make_result =
-        (state.has_met_fractional_part)
-            ? LuaValue::TryMakeLuaFloat(Lexer::output_accumulator_)
-            : LuaValue::TryMakeLuaInteger(Lexer::output_accumulator_);
-
-    if (std::holds_alternative<LuaValue>(try_make_result)) {
-      return ReturnTokenLexerState{
-          .token{.token_kind = TokenKind::kNumericConstant,
-                 .token_data = std::get<LuaValue>(try_make_result)}};
+      Lexer::token_data_accumulator_ += symbol;
+      has_met_fractional_part = true;
+      continue;
     }
-  }
 
-  return ReturnErrorLexerState{.error = LexerErr::kInvalidSymbolMet};
+    if (IsSpace(symbol) || IsOther(symbol)) {
+      const auto try_make_result = [] {
+
+      }();
+
+      if (try_make_result.has_value()) {
+        return {.token_kind = TokenKind::kNumericConstant,
+                .token_data = try_make_result.value()};
+      }
+    }
+
+    throw LexerErr(LexerErrKind::kExpectedDigit);
+  }
 }
 
-inline LexerState Lexer::ConsumeComment(
-    const char symbol, ConsumeCommentLexerState &state) noexcept {
-  if (symbol == '\n') {
-    return ConsumeWhitespaceLexerState{};
-  }
+// inline LexerState Lexer::ConsumeComment(
+//     const char symbol, ConsumeCommentLexerState &state) noexcept {
+//   if (symbol == '\n') {
+//     return ConsumeWhitespaceLexerState{};
+//   }
 
-  return state;
-}
+//   return state;
+// }
 
-Lexer::ReadTokenResult Lexer::ReadToken(std::istream &input_stream) noexcept {
-  Lexer::state_ = ConsumeWhitespaceLexerState{};
+// Lexer::ReadTokenResult Lexer::ReadToken(std::istream &input_stream)
+// noexcept
+// {
+//   Lexer::state_ = ConsumeWhitespaceLexerState{};
 
-  while (input_stream) {
-    typedef std::istream::traits_type CharTraits;
+//   while (input_stream) {
+//     typedef std::istream::traits_type CharTraits;
 
-    const auto read_result = input_stream.peek();
-    const auto symbol = (read_result != CharTraits::eof())
-                            ? CharTraits::to_char_type(read_result)
-                            : '\n';
+//     const auto read_result = input_stream.peek();
+//     const auto symbol = (read_result != CharTraits::eof())
+//                             ? CharTraits::to_char_type(read_result)
+//                             : '\n';
 
-    const auto processing_visitor = [this, symbol](auto &&state) -> LexerState {
-      using T = std::decay_t<decltype(state)>;
+//     const auto processing_visitor = [this, symbol](auto &&state) ->
+//     LexerState {
+//       using T = std::decay_t<decltype(state)>;
 
-      if constexpr (std::is_same<T, ConsumeWhitespaceLexerState>()) {
-        return Lexer::ConsumeWhitespace(symbol, state);
-      }
+//       if constexpr (std::is_same<T, ConsumeWhitespaceLexerState>()) {
+//         return Lexer::ConsumeWhitespace(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, ReadAlphanumericLexerState>()) {
-        return Lexer::ReadAlphanumeric(symbol, state);
-      }
+//       else if constexpr (std::is_same<T, ReadAlphanumericLexerState>()) {
+//         return Lexer::ReadAlphanumeric(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, ReadOtherTokenLexerState>()) {
-        return Lexer::ReadOtherToken(symbol, state);
-      }
+//       else if constexpr (std::is_same<T, ReadOtherTokenLexerState>()) {
+//         return Lexer::ReadOtherToken(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, ReadShortLiteralStringLexerState>()) {
-        return Lexer::ReadShortLiteralString(symbol, state);
-      }
+//       else if constexpr (std::is_same<T,
+//       ReadShortLiteralStringLexerState>())
+//       {
+//         return Lexer::ReadShortLiteralString(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, ReadNumericConstantLexerState>()) {
-        return Lexer::ReadNumericConstant(symbol, state);
-      }
+//       else if constexpr (std::is_same<T, ReadNumericConstantLexerState>())
+//       {
+//         return Lexer::ReadNumericConstant(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, ConsumeCommentLexerState>()) {
-        return Lexer::ConsumeComment(symbol, state);
-      }
+//       else if constexpr (std::is_same<T, ConsumeCommentLexerState>()) {
+//         return Lexer::ConsumeComment(symbol, state);
+//       }
 
-      else if constexpr (std::is_same<T, std::monostate>() ||
-                         std::is_same<T, ReturnTokenLexerState>() ||
-                         std::is_same<T, ReturnErrorLexerState>()) {
-        // TODO(shvrma): add proper handling
-        return state;
-      }
+//       else if constexpr (std::is_same<T, std::monostate>() ||
+//                          std::is_same<T, ReturnTokenLexerState>() ||
+//                          std::is_same<T, ReturnErrorLexerState>()) {
+//         // TODO(shvrma): add proper handling
+//         return state;
+//       }
 
-      else {
-        static_assert(false,
-                      "Seems that some state doesnt have a corresponding "
-                      "handling branch");
-      }
-    };
+//       else {
+//         static_assert(false,
+//                       "Seems that some state doesnt have a corresponding "
+//                       "handling branch");
+//       }
+//     };
 
-    Lexer::state_ = std::visit(processing_visitor, Lexer::state_);
+//     Lexer::state_ = std::visit(processing_visitor, Lexer::state_);
 
-    if (const auto exiting_state = std::visit(
-            [&input_stream](auto &&state) -> std::optional<ReadTokenResult> {
-              using T = std::decay_t<decltype(state)>;
+//     if (const auto exiting_state = std::visit(
+//             [&input_stream](auto &&state) -> std::optional<ReadTokenResult>
+//             {
+//               using T = std::decay_t<decltype(state)>;
 
-              if constexpr (std::is_same<T, ReturnTokenLexerState>()) {
-                if (state.should_consume_current) {
-                  input_stream.get();
-                }
+//               if constexpr (std::is_same<T, ReturnTokenLexerState>()) {
+//                 if (state.should_consume_current) {
+//                   input_stream.get();
+//                 }
 
-                return state.token;
-              }
+//                 return state.token;
+//               }
 
-              else if constexpr (std::is_same<T, ReturnErrorLexerState>()) {
-                return state.error;
-              }
+//               else if constexpr (std::is_same<T, ReturnErrorLexerState>())
+//               {
+//                 return state.error;
+//               }
 
-              return std::nullopt;
-            },
-            Lexer::state_)) {
-      return exiting_state.value();
-    }
+//               return std::nullopt;
+//             },
+//             Lexer::state_)) {
+//       return exiting_state.value();
+//     }
 
-    if (input_stream.eof()) {
-      return LexerErr::kEOF;
-    }
+//     if (input_stream.eof()) {
+//       return LexerErr::kEOF;
+//     }
 
-    input_stream.get();
-  }
+//     input_stream.get();
+//   }
 
-  return LexerErr::kInputNotOk;
-}
+//   return LexerErr::kInputNotOk;
+// }
 
 }  // namespace lualike::lexer
