@@ -46,14 +46,7 @@ enum class TokenKind : uint8_t {
   kOtherSlash,
   kOtherPercent,
   kOtherCaret,  // ^
-  kOtherHash,   // #
-  kOtherAmpersand,
-  kOtherTilde,  // ~
-  kOtherPipe,   // |
-  kOtherDoubleLessThan,
-  kOtherDoubleGreaterThan,
   kOtherDoubleSlash,
-  kOtherSpace,
   kOtherDoubleEqual,
   kOtherTildeEqual,  // ~=
   kOtherLessThanEqual,
@@ -67,28 +60,20 @@ enum class TokenKind : uint8_t {
   kOtherRightFigureBracket,
   kOtherLeftSquareBracket,
   kOtherRightSquareBracket,
-  kOtherDoubleColon,
   kOtherSemicolon,
   kOtherColon,
   kOtherComma,
   kOtherDot,
-  kOtherDoubleDot,
-  kOtherTrimpleDot,
-
-  // Single and double quote as well as double square brackets are skipped
-  // as they delimit the Literal String
 };
 
 struct Token {
   TokenKind token_kind;
-  std::optional<value::LuaValue> token_data;
+  std::optional<value::LualikeValue> token_data;
 
   bool operator==(const Token &rhs) const noexcept = default;
+
+  std::string ToString() const noexcept;
 };
-
-std::istream &operator>>(std::istream &input_stream, Token &token);
-
-void PrintTo(const Token &token, std::ostream *output);
 
 constexpr auto kKeywordsMap =
     std::to_array<std::pair<std::string_view, TokenKind>>({
@@ -124,12 +109,6 @@ constexpr auto kOtherTokensMap =
         {"/", TokenKind::kOtherSlash},
         {"%", TokenKind::kOtherPercent},
         {"^", TokenKind::kOtherCaret},
-        {"#", TokenKind::kOtherHash},
-        {"&", TokenKind::kOtherAmpersand},
-        {"~", TokenKind::kOtherTilde},
-        {"|", TokenKind::kOtherPipe},
-        {"<<", TokenKind::kOtherDoubleLessThan},
-        {">>", TokenKind::kOtherDoubleGreaterThan},
         {"//", TokenKind::kOtherDoubleSlash},
         {"==", TokenKind::kOtherDoubleEqual},
         {"~=", TokenKind::kOtherTildeEqual},
@@ -144,35 +123,37 @@ constexpr auto kOtherTokensMap =
         {"}", TokenKind::kOtherRightFigureBracket},
         {"[", TokenKind::kOtherLeftSquareBracket},
         {"]", TokenKind::kOtherRightSquareBracket},
-        {"::", TokenKind::kOtherDoubleColon},
         {";", TokenKind::kOtherSemicolon},
         {":", TokenKind::kOtherColon},
         {",", TokenKind::kOtherComma},
         {".", TokenKind::kOtherDot},
-        {"..", TokenKind::kOtherDoubleDot},
-        {"...", TokenKind::kOtherTrimpleDot},
     });
 
-const std::unordered_map<token::TokenKind, int> kBinOperatorPrecedenceLevelMap{
+const std::unordered_map<TokenKind, uint8_t> kBinOpsPrecedences = {{
     {TokenKind::kKeywordOr, 1},
 
     {TokenKind::kKeywordAnd, 2},
 
-    {TokenKind::kOtherLessThan, 3},      {TokenKind::kOtherGreaterThan, 3},
-    {TokenKind::kOtherLessThanEqual, 3}, {TokenKind::kOtherGreaterThanEqual, 3},
-    {TokenKind::kOtherTildeEqual, 3},    {TokenKind::kOtherDoubleEqual, 3},
+    {TokenKind::kOtherLessThan, 3},
+    {TokenKind::kOtherGreaterThan, 3},
+    {TokenKind::kOtherLessThanEqual, 3},
+    {TokenKind::kOtherGreaterThanEqual, 3},
+    {TokenKind::kOtherTildeEqual, 3},
+    {TokenKind::kOtherDoubleEqual, 3},
 
-    {TokenKind::kOtherPipe, 4},
+    {TokenKind::kOtherPlus, 9},
+    {TokenKind::kOtherMinus, 9},
 
-    {TokenKind::kOtherTilde, 5},
+    {TokenKind::kOtherAsterisk, 10},
+    {TokenKind::kOtherSlash, 10},
+    {TokenKind::kOtherDoubleSlash, 10},
+    {TokenKind::kOtherPercent, 10},
 
-    {TokenKind::kOtherAmpersand, 6},
+    {TokenKind::kOtherCaret, 11},
+}};
 
-    {TokenKind::kOtherPlus, 9},          {TokenKind::kOtherMinus, 9},
-
-    {TokenKind::kOtherAsterisk, 10},     {TokenKind::kOtherSlash, 10},
-    {TokenKind::kOtherDoubleSlash, 10},  {TokenKind::kOtherPercent, 10},
-};
+const std::array kUnaryOpsList =
+    std::to_array<TokenKind>({TokenKind::kKeywordNot, TokenKind::kOtherMinus});
 
 }  // namespace lualike::token
 
