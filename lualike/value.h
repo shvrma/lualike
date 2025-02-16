@@ -2,15 +2,27 @@
 #define LUALIKE_VALUE_H_
 
 #include <cstdint>
-#include <expected>
-#include <optional>
 #include <string>
 #include <variant>
 
 namespace lualike::value {
 
-// Specifies the type of a value stored in LuaValue type
-enum class LuaValueKind : uint8_t {
+enum class LualikeValueOpErrKind : uint8_t {
+  kLhsOperandNotNumeric,
+  kRhsOperandNotNumeric,
+  kInvalidType,
+};
+
+// An exception type to be thrown in operations on LualikeValue. Clarification
+// on what happened is given by _error_kind_ member, whose values are
+// self-descriptive.
+struct LualikeValueOpErr : std::exception {
+  LualikeValueOpErrKind error_kind;
+
+  explicit LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept;
+};
+
+enum class LualikeValueType : uint8_t {
   kNil,
   kBool,
   kInt,
@@ -18,70 +30,63 @@ enum class LuaValueKind : uint8_t {
   kString,
 };
 
-using LuaNilInnerType = std::monostate;
-using LuaBoolInnerType = bool;
-using LuaIntInnerType = int64_t;
-using LuaFloatInnerType = double;
-using LuaStringInnerType = std::string;
+// Represents a single value within _lualike_. Note, though, that in _lualike_
+// values have types, and each type has a corresponding C++ type associated with
+// it. All the types are enumerated in the _LualikeValueType_ enumeration.
+// Underlying C++ types are aliased as _*T_ within this struct (e.g.
+// _Lualike::NilT_ is alias to lualike nil type).
+struct LualikeValue {
+  using NilT = std::monostate;
+  using BoolT = bool;
+  using IntT = int64_t;
+  using FloatT = double;
+  using StringT = std::string;
 
-enum class ArithmeticOpErr : uint8_t { kLhsNotNumeric, kRhsNotNumeric };
+  std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value;
 
-enum class TryMakeErr : uint8_t {
-  kOutOfRange,
-  kInvalidInput,
-};
+  explicit constexpr LualikeValue(decltype(inner_value) &&value) noexcept;
+  // Construct value such as its type is nil.
+  explicit constexpr LualikeValue() noexcept;
 
-// Represents a single value within lualike
-//
-// Note: there are no other types for this purpose as it stores value by itself,
-// not looking at its data type. You can check the kind of a VALUE inside by
-// calling GetValueKind().
-class LuaValue {
-  std::variant<LuaNilInnerType, LuaBoolInnerType, LuaIntInnerType,
-               LuaFloatInnerType, LuaStringInnerType>
-      inner_value_;
-
-  explicit constexpr LuaValue(decltype(inner_value_) &&value) noexcept;
-  explicit constexpr LuaValue() noexcept;
-
-  using ArithmeticOpResult = std::expected<LuaValue, ArithmeticOpErr>;
-  using TryMakeResult = std::expected<LuaValue, TryMakeErr>;
-
-  ArithmeticOpResult PerformArithmeticOp(const LuaValue &rhs,
-                                         auto operation) const noexcept;
-
-  template <typename InnerT>
-  static TryMakeResult TryMakeLuaNum(std::string_view input);
-
- public:
-  LuaValueKind GetValueKind() const noexcept;
+  LualikeValueType GetValueType() const noexcept;
   std::string ToString() const noexcept;
 
-  static TryMakeResult TryMakeLuaInteger(std::string_view input) noexcept;
-  static TryMakeResult TryMakeLuaFloat(std::string_view input) noexcept;
-  std::optional<LuaValue> TryConvertToFloat() const noexcept;
+  bool operator==(const LualikeValue &rhs) const noexcept = default;
 
-  static LuaValue MakeLuaNil() noexcept;
-  static LuaValue MakeLuaString(std::string_view input) noexcept;
-  static LuaValue MakeLuaString(std::string &&input) noexcept;
-  static LuaValue MakeLuaBoolean(bool input) noexcept;
+  // Performs adding as this: if both operands are int, sums up integers;
+  // otherwise if both are numeric interprets operands as floats and sums them
+  // up.
+  LualikeValue operator+(const LualikeValue &rhs) const;
+  // Performs substraction similarly as summation operator do.
+  LualikeValue operator-(const LualikeValue &rhs) const;
+  // Performs multiplication similarly as summation operator do.
+  LualikeValue operator*(const LualikeValue &rhs) const;
+  // Performs division by first converting both operands to float.
+  LualikeValue operator/(const LualikeValue &rhs) const;
+  // Performs division by first converting both operands to float and then
+  // rounding the result towards minus infinity.
+  LualikeValue FloorDivide(const LualikeValue &rhs) const;
+  // Performs modulo division similarly as summation operator do.
+  LualikeValue operator%(const LualikeValue &rhs) const;
+  // Exponantiates current value to RHS operator value by first conveerting them
+  // both to float. Because of that exponents can be non-integer.
+  LualikeValue Exponentiate(const LualikeValue &rhs) const;
 
-  bool operator==(const LuaValue &rhs) const noexcept = default;
+  // Negates the number.
+  LualikeValue operator-() const;
 
-  ArithmeticOpResult operator+(const LuaValue &rhs) const noexcept;
-  ArithmeticOpResult operator-(const LuaValue &rhs) const noexcept;
-  ArithmeticOpResult operator*(const LuaValue &rhs) const noexcept;
-  ArithmeticOpResult operator/(const LuaValue &rhs) const noexcept;
-  ArithmeticOpResult FloorDivide(const LuaValue &rhs) const noexcept;
-  ArithmeticOpResult operator%(const LuaValue &rhs) const noexcept;
-  // Not a binary XOR but exponantiation operation
-  ArithmeticOpResult operator^(const LuaValue &rhs) const noexcept;
-
-  friend LuaValue operator""_lua_int(unsigned long long int value);
-  friend LuaValue operator""_lua_float(long double value);
-  friend LuaValue operator""_lua_str(const char *string,
-                                     std::size_t length) noexcept;
+  // Performs logical AND on operands.
+  LualikeValue operator&&(const LualikeValue &rhs) const;
+  // Performs logical OR on operands.
+  LualikeValue operator||(const LualikeValue &rhs) const;
+  // Performs logical NOT on operands.
+  LualikeValue operator!() const;
 };
+
+constexpr LualikeValue operator""_lua_int(unsigned long long int value);
+constexpr LualikeValue operator""_lua_float(long double value);
+constexpr LualikeValue operator""_lua_str(const char *string,
+                                          std::size_t length) noexcept;
 
 }  // namespace lualike::value
 

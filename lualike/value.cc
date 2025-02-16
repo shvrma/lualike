@@ -1,103 +1,52 @@
 #include "value.h"
 
-#include <charconv>
 #include <cmath>
+#include <type_traits>
 
 namespace value = lualike::value;
 
-using value::ArithmeticOpErr;
-using value::LuaValue;
-using value::LuaValueKind;
-using value::TryMakeErr;
+using value::LualikeValue;
+using value::LualikeValueOpErr;
+using value::LualikeValueOpErrKind;
+using value::LualikeValueType;
 
-constexpr LuaValue::LuaValue(decltype(inner_value_) &&value_) noexcept
-    : inner_value_(value_) {}
+// Helper functions.
+static LualikeValue ToFloat(const LualikeValue &operand);
+static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
+                                        const LualikeValue &rhs,
+                                        auto operation);
 
-constexpr LuaValue::LuaValue() noexcept : inner_value_(LuaNilInnerType{}) {}
+LualikeValueOpErr::LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept
+    : error_kind(error_kind) {}
 
-LuaValue::ArithmeticOpResult LuaValue::PerformArithmeticOp(
-    const LuaValue &rhs, auto operation) const noexcept {
-  const auto try_with_float_rhs =
-      [&](LuaFloatInnerType Lhs) -> LuaValue::ArithmeticOpResult {
-    const auto RhsAsFloat = rhs.TryConvertToFloat();
-    if (!RhsAsFloat) {
-      return std::unexpected(ArithmeticOpErr::kRhsNotNumeric);
-    }
+constexpr LualikeValue::LualikeValue(decltype(inner_value) &&value) noexcept
+    : inner_value(value) {}
 
-    return LuaValue(LuaFloatInnerType{operation(
-        Lhs, std::get<LuaFloatInnerType>(RhsAsFloat.value().inner_value_))});
-  };
+constexpr LualikeValue::LualikeValue() noexcept
+    : inner_value(LualikeValue::NilT{}) {}
 
-  const auto visitor = [&](auto &&Value) -> LuaValue::ArithmeticOpResult {
-    using T = std::decay_t<decltype(Value)>;
-
-    if constexpr (std::is_same<T, LuaIntInnerType>()) {
-      if (rhs.GetValueKind() == LuaValueKind::kInt) {
-        return LuaValue(LuaIntInnerType{
-            operation(Value, std::get<LuaIntInnerType>(rhs.inner_value_))});
-      }
-
-      return try_with_float_rhs(static_cast<LuaFloatInnerType>(Value));
-    }
-
-    if constexpr (std::is_same<T, LuaFloatInnerType>()) {
-      if (rhs.GetValueKind() == LuaValueKind::kFloat) {
-        return LuaValue(LuaFloatInnerType{
-            operation(Value, std::get<LuaFloatInnerType>(rhs.inner_value_))});
-      }
-
-      return try_with_float_rhs(Value);
-    }
-
-    else {
-      return std::unexpected(ArithmeticOpErr::kLhsNotNumeric);
-    }
-  };
-
-  return std::visit(visitor, LuaValue::inner_value_);
-}
-
-template <typename InnerT>
-inline std::expected<LuaValue, TryMakeErr> LuaValue::TryMakeLuaNum(
-    std::string_view Input) {
-  InnerT Num{};
-
-  const auto [Ptr, ErrorCode] =
-      std::from_chars(Input.data(), Input.data() + Input.length(), Num);
-
-  if (ErrorCode == std::errc{}) {
-    return LuaValue(Num);
-  }
-
-  if (ErrorCode == std::errc::result_out_of_range) {
-    return std::unexpected{TryMakeErr::kOutOfRange};
-  }
-
-  return std::unexpected{TryMakeErr::kInvalidInput};
-}
-
-inline LuaValueKind LuaValue::GetValueKind() const noexcept {
-  const auto visitor = [](auto &&value) -> LuaValueKind {
+inline LualikeValueType LualikeValue::GetValueType() const noexcept {
+  const auto visitor = [](auto &&value) -> LualikeValueType {
     using T = std::decay_t<decltype(value)>;
 
-    if constexpr (std::is_same<T, LuaNilInnerType>()) {
-      return LuaValueKind::kNil;
+    if constexpr (std::is_same<T, LualikeValue::NilT>()) {
+      return LualikeValueType::kNil;
     }
 
-    else if constexpr (std::is_same<T, LuaBoolInnerType>()) {
-      return LuaValueKind::kBool;
+    else if constexpr (std::is_same<T, LualikeValue::BoolT>()) {
+      return LualikeValueType::kBool;
     }
 
-    else if constexpr (std::is_same<T, LuaIntInnerType>()) {
-      return LuaValueKind::kInt;
+    else if constexpr (std::is_same<T, LualikeValue::IntT>()) {
+      return LualikeValueType::kInt;
     }
 
-    else if constexpr (std::is_same<T, LuaFloatInnerType>()) {
-      return LuaValueKind::kFloat;
+    else if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
+      return LualikeValueType::kFloat;
     }
 
-    else if constexpr (std::is_same<T, LuaStringInnerType>()) {
-      return LuaValueKind::kString;
+    else if constexpr (std::is_same<T, LualikeValue::StringT>()) {
+      return LualikeValueType::kString;
     }
 
     else {
@@ -105,18 +54,18 @@ inline LuaValueKind LuaValue::GetValueKind() const noexcept {
     }
   };
 
-  return std::visit(visitor, LuaValue::inner_value_);
+  return std::visit(visitor, LualikeValue::inner_value);
 }
 
-std::string LuaValue::ToString() const noexcept {
+std::string LualikeValue::ToString() const noexcept {
   const auto visitor = [](auto &&value) -> std::string {
     using T = std::decay_t<decltype(value)>;
 
-    if constexpr (std::is_same<T, LuaNilInnerType>()) {
+    if constexpr (std::is_same<T, LualikeValue::NilT>()) {
       return "nil";
     }
 
-    else if constexpr (std::is_same<T, LuaBoolInnerType>()) {
+    else if constexpr (std::is_same<T, LualikeValue::BoolT>()) {
       if (value) {
         return "true";
       }
@@ -124,12 +73,12 @@ std::string LuaValue::ToString() const noexcept {
       return "false";
     }
 
-    else if constexpr (std::is_same<T, LuaIntInnerType>() ||
-                       std::is_same<T, LuaFloatInnerType>()) {
+    else if constexpr (std::is_same<T, LualikeValue::IntT>() ||
+                       std::is_same<T, LualikeValue::FloatT>()) {
       return std::to_string(value);
     }
 
-    else if constexpr (std::is_same<T, LuaStringInnerType>()) {
+    else if constexpr (std::is_same<T, LualikeValue::StringT>()) {
       return std::string{value};
     }
 
@@ -138,36 +87,100 @@ std::string LuaValue::ToString() const noexcept {
     }
   };
 
-  return std::visit(visitor, LuaValue::inner_value_);
+  return std::visit(visitor, LualikeValue::inner_value);
 }
 
-std::expected<LuaValue, TryMakeErr> LuaValue::TryMakeLuaInteger(
-    std::string_view input) noexcept {
-  return LuaValue::TryMakeLuaNum<LuaIntInnerType>(input);
+LualikeValue LualikeValue::operator+(const LualikeValue &rhs) const {
+  return PerformArithmeticOp(
+      *this, rhs,
+      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
+          -> OperandT { return lhs + rhs; });
 }
 
-std::expected<LuaValue, TryMakeErr> LuaValue::TryMakeLuaFloat(
-    std::string_view input) noexcept {
-  return LuaValue::TryMakeLuaNum<LuaFloatInnerType>(input);
+LualikeValue LualikeValue::operator-(const LualikeValue &rhs) const {
+  return PerformArithmeticOp(
+      *this, rhs,
+      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
+          -> OperandT { return lhs - rhs; });
 }
 
-std::optional<LuaValue> LuaValue::TryConvertToFloat() const noexcept {
-  const auto visitor = [](auto &&value) -> std::optional<LuaValue> {
+LualikeValue LualikeValue::operator*(const LualikeValue &rhs) const {
+  return PerformArithmeticOp(
+      *this, rhs,
+      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
+          -> OperandT { return lhs * rhs; });
+}
+
+LualikeValue LualikeValue::operator/(const LualikeValue &rhs) const {
+  const auto lhs_as_float = ToFloat(*this);
+  const auto rhs_as_float = ToFloat(rhs);
+
+  return LualikeValue(LualikeValue::FloatT{
+      std::get<LualikeValue::FloatT>(lhs_as_float.inner_value) /
+      std::get<LualikeValue::FloatT>(rhs_as_float.inner_value)});
+}
+
+LualikeValue LualikeValue::FloorDivide(const LualikeValue &rhs) const {
+  const auto division_rslt = *this / rhs;
+
+  return LualikeValue(LualikeValue::FloatT{
+      std::floor(std::get<LualikeValue::FloatT>(division_rslt.inner_value))});
+}
+
+LualikeValue LualikeValue::operator%(const LualikeValue &rhs) const {
+  const auto division_result = *this % rhs;
+
+  return LualikeValue(LualikeValue::FloatT{
+      std::floor(std::get<LualikeValue::FloatT>(division_result.inner_value))});
+}
+
+LualikeValue LualikeValue::Exponentiate(const LualikeValue &rhs) const {
+  const auto to_float = [](const LualikeValue &value) {
+    try {
+      return ToFloat(value);
+    } catch (LualikeValueOpErr &err) {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsOperandNotNumeric);
+    }
+  };
+
+  const LualikeValue lhs_as_float = to_float(*this);
+  const LualikeValue rhs_as_float = to_float(rhs);
+
+  return LualikeValue(LualikeValue::FloatT{
+      std::pow(std::get<LualikeValue::FloatT>(lhs_as_float.inner_value),
+               std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+}
+
+constexpr LualikeValue value::operator""_lua_int(unsigned long long int value) {
+  return LualikeValue(static_cast<LualikeValue::IntT>(value));
+}
+
+constexpr LualikeValue value::operator""_lua_float(long double value) {
+  return LualikeValue(static_cast<LualikeValue::FloatT>(value));
+}
+
+constexpr LualikeValue value::operator""_lua_str(const char *string,
+                                                 std::size_t length) noexcept {
+  return LualikeValue(LualikeValue::StringT(string, length));
+}
+
+LualikeValue ToFloat(const LualikeValue &operand) {
+  const auto visitor = [](auto &&value) -> LualikeValue {
     using T = std::decay_t<decltype(value)>;
 
-    if constexpr (std::is_same<T, LuaIntInnerType>()) {
-      return LuaValue{static_cast<LuaFloatInnerType>(value)};
+    if constexpr (std::is_same<T, LualikeValue::IntT>()) {
+      return LualikeValue{static_cast<LualikeValue::FloatT>(value)};
     }
 
-    else if constexpr (std::is_same<T, LuaFloatInnerType>()) {
-      return LuaValue{value};
+    else if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
+      return LualikeValue{value};
 
     }
 
-    else if constexpr (std::is_same<T, LuaNilInnerType>() ||
-                       std::is_same<T, LuaBoolInnerType>() ||
-                       std::is_same<T, LuaStringInnerType>()) {
-      return std::nullopt;
+    else if constexpr (std::is_same<T, LualikeValue::NilT>() ||
+                       std::is_same<T, LualikeValue::BoolT>() ||
+                       std::is_same<T, LualikeValue::StringT>()) {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kInvalidType);
     }
 
     else {
@@ -175,116 +188,52 @@ std::optional<LuaValue> LuaValue::TryConvertToFloat() const noexcept {
     }
   };
 
-  return std::visit(visitor, LuaValue::inner_value_);
+  return std::visit(visitor, operand.inner_value);
 }
 
-LuaValue LuaValue::MakeLuaNil() noexcept { return LuaValue(LuaNilInnerType{}); }
+LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
+                                 const LualikeValue &rhs, auto operation) {
+  const auto to_float = [](const LualikeValue &value) {
+    try {
+      return ToFloat(value);
+    } catch (LualikeValueOpErr &err) {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsOperandNotNumeric);
+    }
+  };
 
-LuaValue LuaValue::MakeLuaString(std::string_view input) noexcept {
-  return LuaValue(LuaStringInnerType{input});
-}
+  const auto visitor = [&](auto &&lhs_value) -> LualikeValue {
+    using T = std::decay_t<decltype(lhs_value)>;
 
-LuaValue LuaValue::MakeLuaString(std::string &&input) noexcept {
-  return LuaValue(LuaStringInnerType{std::move(input)});
-}
+    if constexpr (std::is_same<T, LualikeValue::IntT>()) {
+      if (rhs.GetValueType() == LualikeValueType::kInt) {
+        return LualikeValue(LualikeValue::IntT{operation(
+            lhs_value, std::get<LualikeValue::IntT>(rhs.inner_value))});
+      }
 
-LuaValue LuaValue::MakeLuaBoolean(bool input) noexcept {
-  if (input) {
-    return LuaValue(true);
-  }
+      const LualikeValue lhs_as_float = to_float(lhs);
+      const LualikeValue rhs_as_float = to_float(rhs);
 
-  return LuaValue(false);
-}
+      return LualikeValue(LualikeValue::FloatT{
+          operation(std::get<LualikeValue::FloatT>(lhs_as_float.inner_value),
+                    std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+    }
 
-LuaValue::ArithmeticOpResult LuaValue::operator+(
-    const LuaValue &rhs) const noexcept {
-  return LuaValue::PerformArithmeticOp(
-      rhs, []<typename OperandT>(OperandT lhs, OperandT rhs) -> OperandT {
-        return lhs + rhs;
-      });
-}
+    if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
+      if (rhs.GetValueType() == LualikeValueType::kFloat) {
+        return LualikeValue(LualikeValue::FloatT{operation(
+            lhs_value, std::get<LualikeValue::FloatT>(rhs.inner_value))});
+      }
 
-LuaValue::ArithmeticOpResult LuaValue::operator-(
-    const LuaValue &rhs) const noexcept {
-  return LuaValue::PerformArithmeticOp(
-      rhs, []<typename OperandT>(OperandT lhs, OperandT rhs) -> OperandT {
-        return lhs + rhs;
-      });
-}
+      const LualikeValue rhs_as_float = to_float(rhs);
+      return LualikeValue(LualikeValue::FloatT{
+          operation(lhs_value,
+                    std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+    }
 
-LuaValue::ArithmeticOpResult LuaValue::operator*(
-    const LuaValue &rhs) const noexcept {
-  return LuaValue::PerformArithmeticOp(
-      rhs, []<typename OperandT>(OperandT lhs, OperandT rhs) -> OperandT {
-        return lhs + rhs;
-      });
-}
+    else {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsOperandNotNumeric);
+    }
+  };
 
-LuaValue::ArithmeticOpResult LuaValue::operator/(
-    const LuaValue &rhs) const noexcept {
-  const auto lhs_as_float = LuaValue::TryConvertToFloat();
-  if (!lhs_as_float) {
-    return std::unexpected(ArithmeticOpErr::kLhsNotNumeric);
-  }
-
-  const auto rhs_as_float = rhs.TryConvertToFloat();
-  if (!rhs_as_float) {
-    return std::unexpected(ArithmeticOpErr::kRhsNotNumeric);
-  }
-
-  return LuaValue(LuaFloatInnerType{
-      std::get<LuaFloatInnerType>(lhs_as_float.value().inner_value_) /
-      std::get<LuaFloatInnerType>(rhs_as_float.value().inner_value_)});
-}
-
-LuaValue::ArithmeticOpResult LuaValue::FloorDivide(
-    const LuaValue &rhs) const noexcept {
-  const auto division_rslt = *this / rhs;
-  if (!division_rslt) {
-    return division_rslt;
-  }
-
-  return LuaValue(LuaFloatInnerType{std::floor(
-      std::get<LuaFloatInnerType>(division_rslt.value().inner_value_))});
-}
-
-LuaValue::ArithmeticOpResult LuaValue::operator%(
-    const LuaValue &rhs) const noexcept {
-  const auto division_result = *this % rhs;
-  if (!division_result) {
-    return division_result;
-  }
-
-  return LuaValue(LuaFloatInnerType{std::floor(
-      std::get<LuaFloatInnerType>(division_result.value().inner_value_))});
-}
-
-LuaValue::ArithmeticOpResult LuaValue::operator^(
-    const LuaValue &rhs) const noexcept {
-  const auto lhs_as_float = LuaValue::TryConvertToFloat();
-  if (!lhs_as_float) {
-    return std::unexpected(ArithmeticOpErr::kLhsNotNumeric);
-  }
-
-  const auto rhs_as_float = rhs.TryConvertToFloat();
-  if (!rhs_as_float) {
-    return std::unexpected(ArithmeticOpErr::kRhsNotNumeric);
-  }
-
-  return LuaValue(LuaFloatInnerType{std::pow(
-      std::get<LuaFloatInnerType>(lhs_as_float.value().inner_value_),
-      std::get<LuaFloatInnerType>(rhs_as_float.value().inner_value_))});
-}
-
-LuaValue value::operator""_lua_int(unsigned long long int value) {
-  return LuaValue(static_cast<LuaIntInnerType>(value));
-}
-
-LuaValue value::operator""_lua_float(long double value) {
-  return LuaValue(static_cast<LuaFloatInnerType>(value));
-}
-
-LuaValue value::operator""_lua_str(const char *string,
-                                   std::size_t length) noexcept {
-  return LuaValue(LuaStringInnerType(string, length));
+  return std::visit(visitor, lhs.inner_value);
 }
