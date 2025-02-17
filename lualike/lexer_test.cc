@@ -6,7 +6,9 @@
 #include "token.h"
 #include "value.h"
 
-namespace lualike::lexer {
+namespace lexer = lualike::lexer;
+namespace token = lualike::token;
+namespace value = lualike::value;
 
 using lexer::Lexer;
 
@@ -17,25 +19,21 @@ using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
 
-typedef std::pair<std::string, std::vector<Lexer::ReadTokenResult>>
-    LexerTestParamT;
+using LexerTestParamT = std::pair<std::string, std::vector<Token>>;
 
 class LexerTest : public testing::TestWithParam<LexerTestParamT> {};
 
 TEST_P(LexerTest, ReadAndCompareWithGiven) {
   const auto &[input, expected_result_sequence] = LexerTest::GetParam();
 
-  std::istringstream prog{input};
-  Lexer lexer{};
+  Lexer lexer(std::string{input});
 
-  for (const Lexer::ReadTokenResult &expected_result :
-       expected_result_sequence) {
-    const auto read_result = lexer.ReadToken(prog);
+  for (const Token &expected_result : expected_result_sequence) {
+    const auto read_result = lexer.ReadToken();
     EXPECT_EQ(read_result, expected_result);
   }
 
-  ASSERT_THAT(lexer.ReadToken(prog),
-              testing::VariantWith<LexerErr>(LexerErr::kEOF));
+  ASSERT_EQ(lexer.ReadToken(), Token{.token_kind = TokenKind::kNone});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -85,10 +83,3 @@ INSTANTIATE_TEST_SUITE_P(
          {Token{TokenKind::kName, "pi"_lua_str}, Token{TokenKind::kOtherEqual},
           Token{TokenKind::kNumericConstant, 3.14159_lua_float}}},
     })));
-
-// INSTANTIATE_TEST_SUITE_P(TestInvalidInputs, LexerTest,
-//                          testing::ValuesIn(std::to_array<LexerTestParamT>({
-//                              {"3.14.159", {LexerErr::kInvalidSymbolMet}},
-//                          })));
-
-}  // namespace lualike::lexer

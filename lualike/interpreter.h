@@ -1,51 +1,41 @@
 #ifndef LUALIKE_INTERPRETER_H_
 #define LUALIKE_INTERPRETER_H_
 
-#include <iterator>
+#include <ranges>
 #include <unordered_map>
+#include <utility>
 
-#include "token.h"
+#include "lexer.h"
 #include "value.h"
 
 namespace lualike::interpreter {
 
-enum class InterpreterErr : uint8_t { kEOF, kUnknownName, kInvalidToken };
+enum class InterpreterErrKind : uint8_t { kEOF, kUnknownName, kInvalidToken };
 
-struct ReadExpressionInterpreterState {};
+struct InterpreterErr : std::exception {
+  InterpreterErrKind error_kind;
 
-struct ReadPrefixExpressionInterpreterState {};
-
-struct ReturnLuaValueInterpreterState {
-  value::LuaValue output;
+  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept;
 };
 
-struct ReturnErrorInterpreterState {
-  InterpreterErr error;
-};
-
-using InterpreterState =
-    std::variant<ReadExpressionInterpreterState,
-                 ReadPrefixExpressionInterpreterState,
-                 ReturnLuaValueInterpreterState, ReturnErrorInterpreterState>;
-
-using EvaluateResult = std::variant<value::LuaValue, InterpreterErr>;
-
+template <typename InputT>
+  requires lexer::InputTRequirements<InputT>
 class Interpreter {
-  std::unordered_map<std::string, value::LuaValue> local_names_;
+  std::unordered_map<std::string, value::LualikeValue> local_names_;
 
-  std::istream_iterator<token::Token> iter_;
-  std::istream_iterator<token::Token> sentinel_;
+  using TokensRangeT =
+      decltype(std::declval<lexer::Lexer<InputT>>().ReadToken());
 
-  // inline EvaluateResult ReadExpression() noexcept;
-  // inline EvaluateResult ReadPrefixExpression() noexcept;
+  std::ranges::iterator_t<TokensRangeT> iter_;
+  std::ranges::sentinel_t<TokensRangeT> sentinel_;
 
-  EvaluateResult ReadAtom() noexcept;
-  EvaluateResult ReadExpression(int min_precedence) noexcept;
+  value::LualikeValue ReadAtom();
+  value::LualikeValue ReadExpression(int min_precedence);
 
  public:
-  explicit Interpreter(std::istream &input_stream) noexcept;
+  explicit Interpreter(InputT &&input) noexcept;
 
-  EvaluateResult Evaluate() noexcept;
+  value::LualikeValue EvaluateExpression();
 };
 
 }  // namespace lualike::interpreter

@@ -145,16 +145,16 @@ LualikeValue LualikeValue::Exponentiate(const LualikeValue &rhs) const {
                std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
 }
 
-constexpr LualikeValue value::operator""_lua_int(unsigned long long int value) {
+LualikeValue value::operator""_lua_int(unsigned long long int value) {
   return LualikeValue(static_cast<LualikeValue::IntT>(value));
 }
 
-constexpr LualikeValue value::operator""_lua_float(long double value) {
+LualikeValue value::operator""_lua_float(long double value) {
   return LualikeValue(static_cast<LualikeValue::FloatT>(value));
 }
 
-constexpr LualikeValue value::operator""_lua_str(const char *string,
-                                                 std::size_t length) noexcept {
+LualikeValue value::operator""_lua_str(const char *string,
+                                       std::size_t length) noexcept {
   return LualikeValue(LualikeValue::StringT(string, length));
 }
 

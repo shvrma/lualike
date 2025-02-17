@@ -79,10 +79,10 @@ struct LualikeValue {
   LualikeValue operator!() const;
 };
 
-constexpr LualikeValue operator""_lua_int(unsigned long long int value);
-constexpr LualikeValue operator""_lua_float(long double value);
-constexpr LualikeValue operator""_lua_str(const char *string,
-                                          std::size_t length) noexcept;
+LualikeValue operator""_lua_int(unsigned long long int value);
+LualikeValue operator""_lua_float(long double value);
+LualikeValue operator""_lua_str(const char *string,
+                                std::size_t length) noexcept;
 
 }  // namespace lualike::value
 

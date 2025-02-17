@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <generator>
 #include <ranges>
 #include <string>
 
@@ -25,16 +26,16 @@ struct LexerErr : std::exception {
   explicit LexerErr(LexerErrKind error_kind) noexcept;
 };
 
-template <typename LexerInputRangeT>
-concept LexerInputRangeTRequirements =
-    std::ranges::input_range<LexerInputRangeT> &&
-    std::same_as<char, std::ranges::range_value_t<LexerInputRangeT>>;
+template <typename InputT>
+concept InputTRequirements =
+    std::ranges::input_range<InputT> &&
+    std::same_as<char, std::ranges::range_value_t<InputT>>;
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
+template <typename InputT>
+  requires InputTRequirements<InputT>
 class Lexer {
-  std::ranges::iterator_t<LexerInputRangeT> iter_;
-  std::ranges::sentinel_t<LexerInputRangeT> sentinel_;
+  std::ranges::iterator_t<InputT> iter_;
+  std::ranges::sentinel_t<InputT> sentinel_;
 
   std::string token_data_accumulator_;
   static constexpr int kMaxOutputAccumLength = 16;
@@ -55,7 +56,7 @@ class Lexer {
   token::Token ConsumeComment();
 
  public:
-  explicit Lexer(LexerInputRangeT &&input_range) noexcept;
+  explicit Lexer(InputT &&input_range) noexcept;
 
   // Iterates the contained ranged of symbols till syntatically valid token is
   // found, then returning it. In case of EOF returns token whose token_kind
@@ -63,7 +64,7 @@ class Lexer {
   //
   // Supposedly, the input should be valid. Lexer recognizes errors, but in the
   // case of recognition, a LexerErr is thrown.
-  token::Token ReadToken();
+  std::generator<const token::Token &> ReadToken();
 };
 
 }  // namespace lualike::lexer

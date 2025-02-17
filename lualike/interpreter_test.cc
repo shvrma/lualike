@@ -3,30 +3,29 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <sstream>
-#include <string>
-
 #include "value.h"
 
-namespace lualike::interpreter {
+namespace interpreter = lualike::interpreter;
+namespace value = lualike::value;
 
-using value::LuaValue;
+using interpreter::Interpreter;
+
+using value::LualikeValue;
 
 using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
 
-using InterpreterTestParamT = std::pair<std::string, EvaluateResult>;
+using InterpreterTestParamT = std::pair<std::string, LualikeValue>;
 
 class InterpreterTest : public testing::TestWithParam<InterpreterTestParamT> {};
 
 TEST_P(InterpreterTest, ReadAndCompareWithGiven) {
   const auto &[input, expected_evaluation_result] = InterpreterTest::GetParam();
 
-  std::istringstream prog{input};
-  auto interpreter = Interpreter(prog);
+  auto interpreter = Interpreter(std::string{input});
 
-  const auto actual_evaluation_result = interpreter.Evaluate();
+  const auto actual_evaluation_result = interpreter.EvaluateExpression();
 
   ASSERT_EQ(actual_evaluation_result, expected_evaluation_result);
 }
@@ -43,12 +42,3 @@ INSTANTIATE_TEST_SUITE_P(
         {"2 * 2 + 2", 6_lua_int},
         {"6 / 2", 3_lua_int},
     })));
-
-// INSTANTIATE_TEST_SUITE_P(
-//     TestInvalidInputs, InterpreterTest,
-//     testing::ValuesIn(std::to_array<InterpreterTestParamT>({
-//         {"+", InterpreterErr::kInvalidToken},
-//         // {"1 +", InterpreterErr::kInvalidToken},
-//     })));
-
-}  // namespace lualike::interpreter

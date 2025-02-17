@@ -1,16 +1,23 @@
 #include "lexer.h"
 
 #include <algorithm>
+#include <charconv>
 #include <iterator>
 
 #include "token.h"
 #include "value.h"
 
-namespace lualike::lexer {
+namespace lexer = lualike::lexer;
+using lexer::InputTRequirements;
+using lexer::Lexer;
+using lexer::LexerErr;
+using lexer::LexerErrKind;
 
+namespace token = lualike::token;
 using token::Token;
 using token::TokenKind;
 
+namespace value = lualike::value;
 using value::LualikeValue;
 
 namespace {
@@ -170,14 +177,14 @@ static inline bool IsOther(const char symbol) noexcept {
 
 LexerErr::LexerErr(LexerErrKind error_kind) noexcept : error_kind(error_kind) {}
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Lexer<LexerInputRangeT>::Lexer(LexerInputRangeT &&input_range) noexcept
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Lexer<InputT>::Lexer(InputT &&input_range) noexcept
     : iter_(input_range.begin()), sentinel_(input_range.end()) {}
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Token Lexer<LexerInputRangeT>::ConsumeWhitespace() {
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ConsumeWhitespace() {
   for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
     char symbol = *Lexer::iter_;
     if (IsSpace(symbol)) {
@@ -208,13 +215,12 @@ Token Lexer<LexerInputRangeT>::ConsumeWhitespace() {
     throw LexerErr(LexerErrKind::kInvalidSymbolMet);
   }
 
-  // EOF.
-  return {.token_kind = TokenKind::kNone};
+  throw LexerErr(LexerErrKind::kExpectedDigit);
 }
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Token Lexer<LexerInputRangeT>::ReadAlphanumeric() {
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ReadAlphanumeric() {
   for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
     char symbol = *Lexer::iter_;
 
@@ -281,9 +287,9 @@ Token Lexer<LexerInputRangeT>::ReadAlphanumeric() {
   }
 }
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Token Lexer<LexerInputRangeT>::ReadOtherToken() {
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ReadOtherToken() {
   const auto try_match = [this] {
     auto vertex_idx = 0;
 
@@ -340,9 +346,9 @@ Token Lexer<LexerInputRangeT>::ReadOtherToken() {
   }
 }
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Token Lexer<LexerInputRangeT>::ReadShortLiteralString(char delimiter) {
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ReadShortLiteralString(char delimiter) {
   bool is_escaped = false;
 
   for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
@@ -416,9 +422,9 @@ Token Lexer<LexerInputRangeT>::ReadShortLiteralString(char delimiter) {
   throw LexerErr(LexerErrKind::kUnclosedStringLiteral);
 }
 
-template <typename LexerInputRangeT>
-  requires LexerInputRangeTRequirements<LexerInputRangeT>
-Token Lexer<LexerInputRangeT>::ReadNumericConstant() {
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ReadNumericConstant() {
   bool has_met_fractional_part = false;
 
   for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
@@ -440,121 +446,58 @@ Token Lexer<LexerInputRangeT>::ReadNumericConstant() {
     }
 
     if (IsSpace(symbol) || IsOther(symbol)) {
-      const auto try_make_result = [] {
+      const auto try_make = [this]<typename T>() {
+        T num{};
 
-      }();
+        const auto conv_result =
+            std::from_chars(Lexer::token_data_accumulator_.data(),
+                            Lexer::token_data_accumulator_.data() +
+                                Lexer::token_data_accumulator_.size(),
+                            num);
 
-      if (try_make_result.has_value()) {
+        if (conv_result.ec == std::errc::result_out_of_range) {
+          throw LexerErr(LexerErrKind::kTooLongToken);
+        }
+
+        if (conv_result.ec != std::errc{}) {
+          throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+        }
+
+        return num;
+      };
+
+      if (has_met_fractional_part) {
         return {.token_kind = TokenKind::kNumericConstant,
-                .token_data = try_make_result.value()};
+                .token_data = {{LualikeValue::FloatT{try_make()}}}};
       }
+
+      return {.token_kind = TokenKind::kNumericConstant,
+              .token_data = {{LualikeValue::IntT{try_make()}}}};
     }
 
     throw LexerErr(LexerErrKind::kExpectedDigit);
   }
 }
 
-// inline LexerState Lexer::ConsumeComment(
-//     const char symbol, ConsumeCommentLexerState &state) noexcept {
-//   if (symbol == '\n') {
-//     return ConsumeWhitespaceLexerState{};
-//   }
+template <typename InputT>
+  requires InputTRequirements<InputT>
+Token Lexer<InputT>::ConsumeComment() {
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
 
-//   return state;
-// }
+    if (symbol == '\n') {
+      return Lexer::ConsumeWhitespace();
+    }
+  }
 
-// Lexer::ReadTokenResult Lexer::ReadToken(std::istream &input_stream)
-// noexcept
-// {
-//   Lexer::state_ = ConsumeWhitespaceLexerState{};
+  // EOF.
+  throw LexerErr(LexerErrKind::kEOF);
+}
 
-//   while (input_stream) {
-//     typedef std::istream::traits_type CharTraits;
-
-//     const auto read_result = input_stream.peek();
-//     const auto symbol = (read_result != CharTraits::eof())
-//                             ? CharTraits::to_char_type(read_result)
-//                             : '\n';
-
-//     const auto processing_visitor = [this, symbol](auto &&state) ->
-//     LexerState {
-//       using T = std::decay_t<decltype(state)>;
-
-//       if constexpr (std::is_same<T, ConsumeWhitespaceLexerState>()) {
-//         return Lexer::ConsumeWhitespace(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T, ReadAlphanumericLexerState>()) {
-//         return Lexer::ReadAlphanumeric(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T, ReadOtherTokenLexerState>()) {
-//         return Lexer::ReadOtherToken(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T,
-//       ReadShortLiteralStringLexerState>())
-//       {
-//         return Lexer::ReadShortLiteralString(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T, ReadNumericConstantLexerState>())
-//       {
-//         return Lexer::ReadNumericConstant(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T, ConsumeCommentLexerState>()) {
-//         return Lexer::ConsumeComment(symbol, state);
-//       }
-
-//       else if constexpr (std::is_same<T, std::monostate>() ||
-//                          std::is_same<T, ReturnTokenLexerState>() ||
-//                          std::is_same<T, ReturnErrorLexerState>()) {
-//         // TODO(shvrma): add proper handling
-//         return state;
-//       }
-
-//       else {
-//         static_assert(false,
-//                       "Seems that some state doesnt have a corresponding "
-//                       "handling branch");
-//       }
-//     };
-
-//     Lexer::state_ = std::visit(processing_visitor, Lexer::state_);
-
-//     if (const auto exiting_state = std::visit(
-//             [&input_stream](auto &&state) -> std::optional<ReadTokenResult>
-//             {
-//               using T = std::decay_t<decltype(state)>;
-
-//               if constexpr (std::is_same<T, ReturnTokenLexerState>()) {
-//                 if (state.should_consume_current) {
-//                   input_stream.get();
-//                 }
-
-//                 return state.token;
-//               }
-
-//               else if constexpr (std::is_same<T, ReturnErrorLexerState>())
-//               {
-//                 return state.error;
-//               }
-
-//               return std::nullopt;
-//             },
-//             Lexer::state_)) {
-//       return exiting_state.value();
-//     }
-
-//     if (input_stream.eof()) {
-//       return LexerErr::kEOF;
-//     }
-
-//     input_stream.get();
-//   }
-
-//   return LexerErr::kInputNotOk;
-// }
-
-}  // namespace lualike::lexer
+template <typename InputT>
+  requires InputTRequirements<InputT>
+std::generator<const token::Token &> Lexer<InputT>::ReadToken() {
+  while (Lexer::iter_ != Lexer::sentinel_) {
+    co_yield Lexer::ConsumeWhitespace();
+  }
+}

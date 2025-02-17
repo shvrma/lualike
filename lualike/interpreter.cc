@@ -1,20 +1,24 @@
 #include "interpreter.h"
 
-#include <istream>
-#include <variant>
+#include <iterator>
 
+#include "lexer.h"
 #include "token.h"
 #include "value.h"
 
-namespace lualike::interpreter {
+namespace interpreter = lualike::interpreter;
+using interpreter::Interpreter;
 
-namespace {
-
-using token::kBinOperatorPrecedenceLevelMap;
+namespace token = lualike::token;
+using token::kBinOpsPrecedences;
 using token::Token;
 using token::TokenKind;
 
-using value::LuaValue;
+namespace lexer = lualike::lexer;
+using lexer::Lexer;
+
+namespace value = lualike::value;
+using value::LualikeValue;
 
 bool IsExpressionBeginning(const Token& token) noexcept {
   switch (token.token_kind) {
@@ -43,26 +47,20 @@ bool IsBinop(const Token& token) noexcept {
   }
 }
 
-}  // namespace
+template <typename InputT>
+  requires lexer::InputTRequirements<InputT>
+Interpreter<InputT>::Interpreter(InputT&& input) noexcept
+    : iter_(input.begin()), sentinel_(input.end()) {}
 
-Interpreter::Interpreter(std::istream& input_stream) noexcept
-    : iter_(input_stream) {}
-
-EvaluateResult Interpreter::ReadAtom() noexcept {
+template <typename InputRangeT>
+  requires lexer::InputTRequirements<InputRangeT>
+LualikeValue Interpreter<InputRangeT>::ReadAtom() {
   if (Interpreter::iter_ == Interpreter::sentinel_) {
-    return InterpreterErr::kEOF;
+    throw InterpreterErr(InterpreterErrKind::kEOF);
   }
   auto token = *Interpreter::iter_;
 
-  auto atom_value = [&token, this]() -> EvaluateResult {
-    if (token.token_kind == TokenKind::kKeywordNil) {
-      return LuaValue::MakeLuaNil();
-    }
-
-    if (token.token_kind == TokenKind::kNumericConstant) {
-      return *token.token_data;
-    }
-
+  auto atom_value = [&token, this]() -> LualikeValue {
     if (token.token_kind == TokenKind::kName) {
       if (const auto find_result = Interpreter::local_names_.find(
               token.token_data.value().ToString());
@@ -70,7 +68,11 @@ EvaluateResult Interpreter::ReadAtom() noexcept {
         return find_result->second;
       }
 
-      return InterpreterErr::kUnknownName;
+      throw InterpreterErr(InterpreterErrKind::kUnknownName);
+    }
+
+    if (token.token_data) {
+      return token.token_data.value();
     }
 
     if (token.token_kind == TokenKind::kOtherLeftParenthesis) {
@@ -79,27 +81,23 @@ EvaluateResult Interpreter::ReadAtom() noexcept {
       auto inner_value = Interpreter::ReadExpression(1);
 
       if (Interpreter::iter_->token_kind != TokenKind::kOtherRightParenthesis) {
-        return InterpreterErr::kInvalidToken;
+        throw InterpreterErr(InterpreterErrKind::kInvalidToken);
       }
 
       return inner_value;
     }
 
-    return InterpreterErr::kInvalidToken;
+    throw InterpreterErr(InterpreterErrKind::kInvalidToken);
   }();
   Interpreter::iter_++;
 
   return atom_value;
 }
 
-EvaluateResult Interpreter::ReadExpression(int min_precedence) noexcept {
-  LuaValue result{};
-  if (const auto read_result = Interpreter::ReadAtom();
-      std::holds_alternative<LuaValue>(read_result)) {
-    result = std::get<LuaValue>(read_result);
-  } else {
-    return read_result;
-  }
+template <typename InputRangeT>
+  requires lexer::InputTRequirements<InputRangeT>
+LualikeValue Interpreter<InputRangeT>::ReadExpression(int min_precedence) {
+  LualikeValue result = Interpreter::ReadAtom();
 
   while (Interpreter::iter_ != Interpreter::sentinel_) {
     const auto token = *Interpreter::iter_;
@@ -108,40 +106,33 @@ EvaluateResult Interpreter::ReadExpression(int min_precedence) noexcept {
       break;
     }
 
-    const int precedence =
-        kBinOperatorPrecedenceLevelMap.find(token.token_kind)->second;
+    const int precedence = kBinOpsPrecedences.find(token.token_kind)->second;
     if (precedence < min_precedence) {
       break;
     }
 
     Interpreter::iter_++;
 
-    LuaValue rhs{};
-    if (const auto read_result = Interpreter::ReadExpression(precedence + 1);
-        std::holds_alternative<LuaValue>(read_result)) {
-      rhs = std::get<LuaValue>(read_result);
-    } else {
-      return read_result;
-    }
+    LualikeValue rhs = Interpreter::ReadAtom();
 
     if (token.token_kind == TokenKind::kOtherPlus) {
-      result += rhs;
+      result = result + rhs;
     }
 
     else if (token.token_kind == TokenKind::kOtherMinus) {
-      result -= rhs;
+      result = result - rhs;
     }
 
     else if (token.token_kind == TokenKind::kOtherAsterisk) {
-      result *= rhs;
+      result = result * rhs;
     }
 
     else if (token.token_kind == TokenKind::kOtherSlash) {
-      result /= rhs;
+      result = result / rhs;
     }
 
     else {
-      return InterpreterErr::kInvalidToken;
+      throw InterpreterErr(InterpreterErrKind::kInvalidToken);
     }
 
     // Interpreter::iter_++;
@@ -150,8 +141,8 @@ EvaluateResult Interpreter::ReadExpression(int min_precedence) noexcept {
   return result;
 }
 
-EvaluateResult Interpreter::Evaluate() noexcept {
+template <typename InputRangeT>
+  requires lexer::InputTRequirements<InputRangeT>
+LualikeValue Interpreter<InputRangeT>::EvaluateExpression() {
   return Interpreter::ReadExpression(1);
 }
-
-}  // namespace lualike::interpreter
