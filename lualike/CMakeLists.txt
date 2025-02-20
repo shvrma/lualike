@@ -17,9 +17,20 @@ target_sources(
          interpreter.cppm
          lualike.cppm)
 
-add_executable(lualike_test lexer_test.cpp interpreter_test.cpp)
-target_link_libraries(lualike_test lualike GTest::gtest_main)
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.16.0
+)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
 enable_testing()
+
+add_executable(lualike_test lexer_test.cpp interpreter_test.cpp)
+target_link_libraries(lualike_test GTest::gtest_main lualike)
+
 include(GoogleTest)
 gtest_discover_tests(lualike_test)
