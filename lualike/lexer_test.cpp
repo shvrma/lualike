@@ -1,20 +1,18 @@
-#include "lexer.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "token.h"
-#include "value.h"
+#include <algorithm>
+
+import lualike.lexer;
 
 namespace lexer = lualike::lexer;
-namespace token = lualike::token;
-namespace value = lualike::value;
-
 using lexer::Lexer;
 
+namespace token = lualike::token;
 using token::Token;
 using token::TokenKind;
 
+namespace value = lualike::value;
 using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
@@ -27,13 +25,7 @@ TEST_P(LexerTest, ReadAndCompareWithGiven) {
   const auto &[input, expected_result_sequence] = LexerTest::GetParam();
 
   Lexer lexer(std::string{input});
-
-  for (const Token &expected_result : expected_result_sequence) {
-    const auto read_result = lexer.ReadToken();
-    EXPECT_EQ(read_result, expected_result);
-  }
-
-  ASSERT_EQ(lexer.ReadToken(), Token{.token_kind = TokenKind::kNone});
+  ASSERT_TRUE(std::ranges::equal(lexer.ReadTokens(), expected_result_sequence));
 }
 
 INSTANTIATE_TEST_SUITE_P(

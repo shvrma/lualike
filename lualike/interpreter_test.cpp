@@ -1,17 +1,13 @@
-#include "interpreter.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "value.h"
+import lualike.interpreter;
 
 namespace interpreter = lualike::interpreter;
-namespace value = lualike::value;
-
 using interpreter::Interpreter;
 
+namespace value = lualike::value;
 using value::LualikeValue;
-
 using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
@@ -24,7 +20,6 @@ TEST_P(InterpreterTest, ReadAndCompareWithGiven) {
   const auto &[input, expected_evaluation_result] = InterpreterTest::GetParam();
 
   auto interpreter = Interpreter(std::string{input});
-
   const auto actual_evaluation_result = interpreter.EvaluateExpression();
 
   ASSERT_EQ(actual_evaluation_result, expected_evaluation_result);

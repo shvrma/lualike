@@ -1,11 +1,23 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.28)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(lualike lexer.cc token.cc value.cc interpreter.cc)
+add_library(lualike)
+target_sources(
+  lualike
+  PUBLIC FILE_SET
+         lualike_modules
+         TYPE
+         CXX_MODULES
+         FILES
+         token.cppm
+         value.cppm
+         lexer.cppm
+         interpreter.cppm
+         lualike.cppm)
 
-add_executable(lualike_test lexer_test.cc interpreter_test.cc)
+add_executable(lualike_test lexer_test.cpp interpreter_test.cpp)
 target_link_libraries(lualike_test lualike GTest::gtest_main)
 
 enable_testing()

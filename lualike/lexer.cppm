@@ -1,17 +1,77 @@
-#include "lexer.h"
+module;
 
 #include <algorithm>
 #include <charconv>
-#include <iterator>
+#include <cstdint>
+#include <generator>
+#include <ranges>
+#include <string_view>
 
-#include "token.h"
-#include "value.h"
+export module lualike.lexer;
 
-namespace lexer = lualike::lexer;
-using lexer::InputTRequirements;
-using lexer::Lexer;
-using lexer::LexerErr;
-using lexer::LexerErrKind;
+export import lualike.token;
+
+export namespace lualike::lexer {
+
+enum class LexerErrKind : uint8_t {
+  kEOF,
+  kInvalidSymbolMet,
+  kTooLongToken,
+  kUnclosedStringLiteral,
+  kUnrecognizedEscapeSequence,
+  kExpectedDigit,
+};
+
+struct LexerErr : std::exception {
+  LexerErrKind error_kind;
+
+  explicit LexerErr(LexerErrKind error_kind) noexcept;
+};
+
+template <typename InputT>
+concept InputTRequirements =
+    std::ranges::input_range<InputT> &&
+    std::same_as<char, std::ranges::range_value_t<InputT>>;
+
+template <typename InputT>
+  requires InputTRequirements<InputT>
+class Lexer {
+  std::ranges::iterator_t<InputT> iter_;
+  std::ranges::sentinel_t<InputT> sentinel_;
+
+  std::string token_data_accumulator_;
+  static constexpr int kMaxOutputAccumLength = 16;
+
+  // Initial call during token reading.
+  // Pre: valid initial state of Lexer.
+  token::Token ConsumeWhitespace();
+  // Pre: single alphabetic symbol or undescore in accumulator.
+  token::Token ReadAlphanumeric();
+  // Pre: single symbol from alphabet of other tokens -
+  // token::kOtherTokensAlphabet - in accumalator.
+  token::Token ReadOtherToken();
+  // Pre: accumulator is empty and delimiter is got
+  token::Token ReadShortLiteralString(char delimiter);
+  // Pre: single digit is in accumulator.
+  token::Token ReadNumericConstant();
+  // No precondition.
+  token::Token ConsumeComment();
+
+ public:
+  explicit Lexer(InputT &&input_range) noexcept;
+
+  // Iterates the contained ranged of symbols till syntatically valid token is
+  // found, then returning it. In case of EOF returns token whose token_kind
+  // field is set to token::TokenKind::kNone.
+  //
+  // Supposedly, the input should be valid. Lexer recognizes errors, but in the
+  // case of recognition, a LexerErr is thrown.
+  std::generator<const token::Token &> ReadTokens();
+};
+
+}  // namespace lualike::lexer
+
+namespace lualike::lexer {
 
 namespace token = lualike::token;
 using token::Token;
@@ -32,7 +92,7 @@ struct Vertex {
 
 }  // namespace
 
-static constexpr auto kKeywordsTrie = []() consteval {
+constexpr auto kKeywordsTrie = []() consteval {
   constexpr int kAlphabetSize = 26;
 
   constexpr auto calc = [](auto trie) {
@@ -66,11 +126,11 @@ static constexpr auto kKeywordsTrie = []() consteval {
   return calc(std::array<Vertex<kAlphabetSize>, kTrieSize>{}).first;
 }();
 
-static constexpr int kOtherTokensMaxLength = std::ranges::max(
+constexpr int kOtherTokensMaxLength = std::ranges::max(
     token::kOtherTokensMap | std::views::keys |
     std::views::transform([](const auto str) { return str.length(); }));
 
-static constexpr auto kOtherTokensAlphabet = []() consteval {
+constexpr auto kOtherTokensAlphabet = []() consteval {
   constexpr auto all_symbols =
       token::kOtherTokensMap | std::views::keys | std::views::join;
 
@@ -98,13 +158,13 @@ static constexpr auto kOtherTokensAlphabet = []() consteval {
 }();
 
 // Prime numbers list: 11, 13, 17, 19, 23, 29, 31, 37, 41
-static constexpr int kModuloDivisitorOfHashFunction = 37;
+constexpr int kModuloDivisitorOfHashFunction = 37;
 
 static constexpr int OtherTokensHashFunc(const char symbol) noexcept {
   return static_cast<int>(symbol) % kModuloDivisitorOfHashFunction;
 }
 
-static constexpr auto kOtherTokensTrie = []() consteval {
+constexpr auto kOtherTokensTrie = []() consteval {
   // Validate hash function
   std::array<int, kOtherTokensAlphabet.size()> hashes{};
   std::ranges::copy(
@@ -344,6 +404,8 @@ Token Lexer<InputT>::ReadOtherToken() {
   if (match_result != TokenKind::kNone) {
     return {.token_kind = match_result};
   }
+
+  throw LexerErr(LexerErrKind::kInvalidSymbolMet);
 }
 
 template <typename InputT>
@@ -446,8 +508,8 @@ Token Lexer<InputT>::ReadNumericConstant() {
     }
 
     if (IsSpace(symbol) || IsOther(symbol)) {
-      const auto try_make = [this]<typename T>() {
-        T num{};
+      const auto try_make = [this](auto type_tag) {
+        decltype(type_tag) num{};
 
         const auto conv_result =
             std::from_chars(Lexer::token_data_accumulator_.data(),
@@ -468,15 +530,17 @@ Token Lexer<InputT>::ReadNumericConstant() {
 
       if (has_met_fractional_part) {
         return {.token_kind = TokenKind::kNumericConstant,
-                .token_data = {{LualikeValue::FloatT{try_make()}}}};
+                .token_data = {{try_make(LualikeValue::FloatT{})}}};
       }
 
       return {.token_kind = TokenKind::kNumericConstant,
-              .token_data = {{LualikeValue::IntT{try_make()}}}};
+              .token_data = {{try_make(LualikeValue::IntT{})}}};
     }
 
     throw LexerErr(LexerErrKind::kExpectedDigit);
   }
+
+  throw LexerErr(LexerErrKind::kInvalidSymbolMet);
 }
 
 template <typename InputT>
@@ -496,8 +560,10 @@ Token Lexer<InputT>::ConsumeComment() {
 
 template <typename InputT>
   requires InputTRequirements<InputT>
-std::generator<const token::Token &> Lexer<InputT>::ReadToken() {
+std::generator<const token::Token &> Lexer<InputT>::ReadTokens() {
   while (Lexer::iter_ != Lexer::sentinel_) {
     co_yield Lexer::ConsumeWhitespace();
   }
 }
+
+}  // namespace lualike::lexer
