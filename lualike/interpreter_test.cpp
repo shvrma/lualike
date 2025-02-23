@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <string_view>
+
 import lualike.interpreter;
+import lualike.value;
 
 namespace interpreter = lualike::interpreter;
 using interpreter::Interpreter;
@@ -11,14 +14,14 @@ using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
 
-using InterpreterTestParamT = std::pair<std::string, LualikeValue>;
+using InterpreterTestParamT = std::pair<std::string_view, LualikeValue>;
 
 class InterpreterTest : public testing::TestWithParam<InterpreterTestParamT> {};
 
 TEST_P(InterpreterTest, ReadAndCompareWithGiven) {
   const auto &[input, expected_evaluation_result] = InterpreterTest::GetParam();
 
-  auto interpreter = Interpreter(std::string{input});
+  auto interpreter = Interpreter(std::string_view{input});
   const auto actual_evaluation_result = interpreter.EvaluateExpression();
 
   ASSERT_EQ(actual_evaluation_result, expected_evaluation_result);

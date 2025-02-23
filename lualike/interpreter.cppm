@@ -9,39 +9,7 @@ module;
 
 export module lualike.interpreter;
 
-export import lualike.lexer;
-
-export namespace lualike::interpreter {
-
-enum class InterpreterErrKind : uint8_t { kEOF, kUnknownName, kInvalidToken };
-
-struct InterpreterErr : std::exception {
-  InterpreterErrKind error_kind;
-
-  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept;
-};
-
-template <typename InputT>
-  requires lexer::InputTRequirements<InputT>
-class Interpreter {
-  std::unordered_map<std::string, value::LualikeValue> local_names_;
-
-  using TokensRangeT =
-      decltype(std::declval<lexer::Lexer<InputT>>().ReadTokens());
-  TokensRangeT tokens_r_;
-  std::ranges::iterator_t<TokensRangeT> iter_;
-  std::ranges::sentinel_t<TokensRangeT> sentinel_;
-
-  value::LualikeValue ReadAtom();
-  value::LualikeValue ReadExpression(int min_precedence);
-
- public:
-  explicit Interpreter(InputT&& input) noexcept;
-
-  value::LualikeValue EvaluateExpression();
-};
-
-}  // namespace lualike::interpreter
+import lualike.lexer;
 
 namespace lualike::interpreter {
 
@@ -56,11 +24,45 @@ using token::TokenKind;
 namespace value = lualike::value;
 using value::LualikeValue;
 
+export enum class InterpreterErrKind : uint8_t {
+  kEOF,
+  kUnknownName,
+  kInvalidToken
+};
+
+export struct InterpreterErr : std::exception {
+  InterpreterErrKind error_kind;
+
+  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept;
+};
+
+export template <typename InputT>
+  requires lexer::InputTRequirements<InputT>
+class Interpreter {
+  std::unordered_map<std::string, LualikeValue> local_names_;
+
+  using TokensRangeT =
+      decltype(Lexer<InputT>::Tokenize(std::declval<InputT>()));
+  std::ranges::const_iterator_t<TokensRangeT> iter_;
+  std::ranges::const_sentinel_t<TokensRangeT> sentinel_;
+
+  LualikeValue ReadAtom();
+  LualikeValue ReadExpression(int min_precedence);
+
+ public:
+  explicit Interpreter(const InputT&& input) noexcept;
+
+  LualikeValue EvaluateExpression();
+};
+
 template <typename InputT>
   requires lexer::InputTRequirements<InputT>
-Interpreter<InputT>::Interpreter(InputT&& input) noexcept
-    : tokens_r_(Lexer(std::move(input)).ReadTokens()),
-      iter_(tokens_r_.begin()) {}
+Interpreter<InputT>::Interpreter(const InputT&& input) noexcept {
+  const auto tokens_r = Lexer<InputT>::Tokenize(std::move(input));
+
+  Interpreter::iter_ = std::ranges::cbegin(tokens_r);
+  Interpreter::sentinel_ = std::ranges::cend(tokens_r);
+}
 
 template <typename InputRangeT>
   requires lexer::InputTRequirements<InputRangeT>

@@ -7,9 +7,9 @@ module;
 
 export module lualike.value;
 
-export namespace lualike::value {
+namespace lualike::value {
 
-enum class LualikeValueOpErrKind : uint8_t {
+export enum class LualikeValueOpErrKind : uint8_t {
   kLhsOperandNotNumeric,
   kRhsOperandNotNumeric,
   kInvalidType,
@@ -18,13 +18,13 @@ enum class LualikeValueOpErrKind : uint8_t {
 // An exception type to be thrown in operations on LualikeValue. Clarification
 // on what happened is given by _error_kind_ member, whose values are
 // self-descriptive.
-struct LualikeValueOpErr : std::exception {
+export struct LualikeValueOpErr : std::exception {
   LualikeValueOpErrKind error_kind;
 
   explicit LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept;
 };
 
-enum class LualikeValueType : uint8_t {
+export enum class LualikeValueType : uint8_t {
   kNil,
   kBool,
   kInt,
@@ -37,7 +37,7 @@ enum class LualikeValueType : uint8_t {
 // it. All the types are enumerated in the _LualikeValueType_ enumeration.
 // Underlying C++ types are aliased as _*T_ within this struct (e.g.
 // _Lualike::NilT_ is alias to lualike nil type).
-struct LualikeValue {
+export struct LualikeValue {
   using NilT = std::monostate;
   using BoolT = bool;
   using IntT = int64_t;
@@ -46,10 +46,10 @@ struct LualikeValue {
 
   std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value = NilT{};
 
-  LualikeValueType GetValueType() const noexcept;
-  std::string ToString() const noexcept;
+  bool operator==(const LualikeValue &) const = default;
 
-  bool operator==(const LualikeValue &rhs) const noexcept = default;
+  LualikeValueType GetValueType() const;
+  std::string ToString() const;
 
   // Performs adding as this: if both operands are int, sums up integers;
   // otherwise if both are numeric interprets operands as floats and sums them
@@ -81,14 +81,10 @@ struct LualikeValue {
   LualikeValue operator!() const;
 };
 
-LualikeValue operator""_lua_int(unsigned long long int value);
-LualikeValue operator""_lua_float(long double value);
-LualikeValue operator""_lua_str(const char *string,
-                                std::size_t length) noexcept;
-
-}  // namespace lualike::value
-
-namespace lualike::value {
+export LualikeValue operator""_lua_int(unsigned long long int value);
+export LualikeValue operator""_lua_float(long double value);
+export LualikeValue operator""_lua_str(const char *string,
+                                       std::size_t length) noexcept;
 
 static LualikeValue ToFloat(const LualikeValue &operand) {
   const auto visitor = [](auto &&value) -> LualikeValue {
@@ -117,9 +113,10 @@ static LualikeValue ToFloat(const LualikeValue &operand) {
   return std::visit(visitor, operand.inner_value);
 }
 
+template <typename OperatorLambdaT>
 static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
                                         const LualikeValue &rhs,
-                                        auto operation) {
+                                        const OperatorLambdaT operator_lambda) {
   const auto to_float = [](const LualikeValue &value) {
     try {
       return ToFloat(value);
@@ -133,28 +130,28 @@ static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
 
     if constexpr (std::is_same<T, LualikeValue::IntT>()) {
       if (rhs.GetValueType() == LualikeValueType::kInt) {
-        return LualikeValue(LualikeValue::IntT{operation(
-            lhs_value, std::get<LualikeValue::IntT>(rhs.inner_value))});
+        return LualikeValue{LualikeValue::IntT{operator_lambda(
+            lhs_value, std::get<LualikeValue::IntT>(rhs.inner_value))}};
       }
 
       const LualikeValue lhs_as_float = to_float(lhs);
       const LualikeValue rhs_as_float = to_float(rhs);
 
-      return LualikeValue(LualikeValue::FloatT{
-          operation(std::get<LualikeValue::FloatT>(lhs_as_float.inner_value),
-                    std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+      return LualikeValue{LualikeValue::FloatT{operator_lambda(
+          std::get<LualikeValue::FloatT>(lhs_as_float.inner_value),
+          std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))}};
     }
 
     if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
       if (rhs.GetValueType() == LualikeValueType::kFloat) {
-        return LualikeValue(LualikeValue::FloatT{operation(
-            lhs_value, std::get<LualikeValue::FloatT>(rhs.inner_value))});
+        return LualikeValue{LualikeValue::FloatT{operator_lambda(
+            lhs_value, std::get<LualikeValue::FloatT>(rhs.inner_value))}};
       }
 
       const LualikeValue rhs_as_float = to_float(rhs);
-      return LualikeValue(LualikeValue::FloatT{
-          operation(lhs_value,
-                    std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+      return LualikeValue{LualikeValue::FloatT{operator_lambda(
+          lhs_value,
+          std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))}};
     }
 
     else {
@@ -168,7 +165,7 @@ static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
 LualikeValueOpErr::LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept
     : error_kind(error_kind) {}
 
-inline LualikeValueType LualikeValue::GetValueType() const noexcept {
+inline LualikeValueType LualikeValue::GetValueType() const {
   const auto visitor = [](auto &&value) -> LualikeValueType {
     using T = std::decay_t<decltype(value)>;
 
@@ -200,7 +197,7 @@ inline LualikeValueType LualikeValue::GetValueType() const noexcept {
   return std::visit(visitor, LualikeValue::inner_value);
 }
 
-std::string LualikeValue::ToString() const noexcept {
+std::string LualikeValue::ToString() const {
   const auto visitor = [](auto &&value) -> std::string {
     using T = std::decay_t<decltype(value)>;
 
@@ -235,46 +232,40 @@ std::string LualikeValue::ToString() const noexcept {
 
 LualikeValue LualikeValue::operator+(const LualikeValue &rhs) const {
   return PerformArithmeticOp(
-      *this, rhs,
-      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
-          -> OperandT { return lhs + rhs; });
+      *this, rhs, [](const auto lhs, const auto rhs) { return lhs + rhs; });
 }
 
 LualikeValue LualikeValue::operator-(const LualikeValue &rhs) const {
   return PerformArithmeticOp(
-      *this, rhs,
-      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
-          -> OperandT { return lhs - rhs; });
+      *this, rhs, [](const auto lhs, const auto rhs) { return lhs - rhs; });
 }
 
 LualikeValue LualikeValue::operator*(const LualikeValue &rhs) const {
   return PerformArithmeticOp(
-      *this, rhs,
-      []<typename OperandT>(const OperandT lhs, const OperandT rhs)
-          -> OperandT { return lhs * rhs; });
+      *this, rhs, [](const auto lhs, const auto rhs) { return lhs * rhs; });
 }
 
 LualikeValue LualikeValue::operator/(const LualikeValue &rhs) const {
   const auto lhs_as_float = ToFloat(*this);
   const auto rhs_as_float = ToFloat(rhs);
 
-  return LualikeValue(LualikeValue::FloatT{
+  return LualikeValue{LualikeValue::FloatT{
       std::get<LualikeValue::FloatT>(lhs_as_float.inner_value) /
-      std::get<LualikeValue::FloatT>(rhs_as_float.inner_value)});
+      std::get<LualikeValue::FloatT>(rhs_as_float.inner_value)}};
 }
 
 LualikeValue LualikeValue::FloorDivide(const LualikeValue &rhs) const {
   const auto division_rslt = *this / rhs;
 
-  return LualikeValue(LualikeValue::FloatT{
-      std::floor(std::get<LualikeValue::FloatT>(division_rslt.inner_value))});
+  return LualikeValue{LualikeValue::FloatT{
+      std::floor(std::get<LualikeValue::FloatT>(division_rslt.inner_value))}};
 }
 
 LualikeValue LualikeValue::operator%(const LualikeValue &rhs) const {
   const auto division_result = *this % rhs;
 
-  return LualikeValue(LualikeValue::FloatT{
-      std::floor(std::get<LualikeValue::FloatT>(division_result.inner_value))});
+  return LualikeValue{LualikeValue::FloatT{
+      std::floor(std::get<LualikeValue::FloatT>(division_result.inner_value))}};
 }
 
 LualikeValue LualikeValue::Exponentiate(const LualikeValue &rhs) const {
@@ -289,9 +280,9 @@ LualikeValue LualikeValue::Exponentiate(const LualikeValue &rhs) const {
   const LualikeValue lhs_as_float = to_float(*this);
   const LualikeValue rhs_as_float = to_float(rhs);
 
-  return LualikeValue(LualikeValue::FloatT{
+  return LualikeValue{LualikeValue::FloatT{
       std::pow(std::get<LualikeValue::FloatT>(lhs_as_float.inner_value),
-               std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))});
+               std::get<LualikeValue::FloatT>(rhs_as_float.inner_value))}};
 }
 
 }  // namespace lualike::value
@@ -300,14 +291,14 @@ namespace value = lualike::value;
 using value::LualikeValue;
 
 LualikeValue value::operator""_lua_int(unsigned long long value) {
-  return LualikeValue(static_cast<LualikeValue::IntT>(value));
+  return LualikeValue{static_cast<LualikeValue::IntT>(value)};
 }
 
 LualikeValue value::operator""_lua_float(long double value) {
-  return LualikeValue(static_cast<LualikeValue::FloatT>(value));
+  return LualikeValue{static_cast<LualikeValue::FloatT>(value)};
 }
 
 LualikeValue value::operator""_lua_str(const char *string,
                                        std::size_t length) noexcept {
-  return LualikeValue(LualikeValue::StringT(string, length));
+  return LualikeValue{LualikeValue::StringT(string, length)};
 }
