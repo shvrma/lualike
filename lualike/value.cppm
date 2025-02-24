@@ -86,7 +86,7 @@ export LualikeValue operator""_lua_float(long double value);
 export LualikeValue operator""_lua_str(const char *string,
                                        std::size_t length) noexcept;
 
-static LualikeValue ToFloat(const LualikeValue &operand) {
+LualikeValue ToFloat(const LualikeValue &operand) {
   const auto visitor = [](auto &&value) -> LualikeValue {
     using T = std::decay_t<decltype(value)>;
 
@@ -114,9 +114,9 @@ static LualikeValue ToFloat(const LualikeValue &operand) {
 }
 
 template <typename OperatorLambdaT>
-static LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
-                                        const LualikeValue &rhs,
-                                        const OperatorLambdaT operator_lambda) {
+LualikeValue PerformArithmeticOp(const LualikeValue &lhs,
+                                 const LualikeValue &rhs,
+                                 const OperatorLambdaT operator_lambda) {
   const auto to_float = [](const LualikeValue &value) {
     try {
       return ToFloat(value);

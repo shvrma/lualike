@@ -2,6 +2,7 @@ module;
 
 #include <cstdint>
 #include <exception>
+#include <generator>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -41,28 +42,34 @@ export template <typename InputT>
 class Interpreter {
   std::unordered_map<std::string, LualikeValue> local_names_;
 
-  using TokensRangeT =
-      decltype(Lexer<InputT>::Tokenize(std::declval<InputT>()));
+  using TokensRangeT = std::generator<const Token&>;
   std::ranges::const_iterator_t<TokensRangeT> iter_;
   std::ranges::const_sentinel_t<TokensRangeT> sentinel_;
+
+  explicit Interpreter(TokensRangeT&& tokens_range);
 
   LualikeValue ReadAtom();
   LualikeValue ReadExpression(int min_precedence);
 
  public:
-  explicit Interpreter(const InputT&& input) noexcept;
+  explicit Interpreter(InputT&& input);
 
   LualikeValue EvaluateExpression();
 };
 
+InterpreterErr::InterpreterErr(InterpreterErrKind error_kind) noexcept
+    : error_kind(error_kind) {}
+
 template <typename InputT>
   requires lexer::InputTRequirements<InputT>
-Interpreter<InputT>::Interpreter(const InputT&& input) noexcept {
-  const auto tokens_r = Lexer<InputT>::Tokenize(std::move(input));
+Interpreter<InputT>::Interpreter(TokensRangeT&& tokens_range)
+    : iter_(std::ranges::cbegin(tokens_range)),
+      sentinel_(std::ranges::cend(tokens_range)) {}
 
-  Interpreter::iter_ = std::ranges::cbegin(tokens_r);
-  Interpreter::sentinel_ = std::ranges::cend(tokens_r);
-}
+template <typename InputT>
+  requires lexer::InputTRequirements<InputT>
+Interpreter<InputT>::Interpreter(InputT&& input)
+    : Interpreter(Lexer<InputT>::ReadTokens(std::move(input))) {}
 
 template <typename InputRangeT>
   requires lexer::InputTRequirements<InputRangeT>
@@ -72,7 +79,7 @@ LualikeValue Interpreter<InputRangeT>::ReadAtom() {
   }
 
   return [this]() -> LualikeValue {
-    auto token = *Interpreter::iter_;
+    const auto token = *Interpreter::iter_;
 
     if (token.token_kind == TokenKind::kName) {
       if (const auto find_result = Interpreter::local_names_.find(
@@ -93,10 +100,10 @@ LualikeValue Interpreter<InputRangeT>::ReadAtom() {
     if (token.token_kind == TokenKind::kOtherLeftParenthesis) {
       Interpreter::iter_++;
 
-      auto inner_value = Interpreter::ReadExpression(1);
+      const LualikeValue inner_value = Interpreter::ReadExpression(1);
 
-      token = *Interpreter::iter_;
-      if (token.token_kind != TokenKind::kOtherRightParenthesis) {
+      if ((*Interpreter::iter_).token_kind !=
+          TokenKind::kOtherRightParenthesis) {
         throw InterpreterErr(InterpreterErrKind::kInvalidToken);
       }
 
@@ -127,30 +134,30 @@ LualikeValue Interpreter<InputRangeT>::ReadExpression(int min_precedence) {
     }
 
     Interpreter::iter_++;
-
     LualikeValue rhs = Interpreter::ReadAtom();
 
-    if (token.token_kind == TokenKind::kOtherPlus) {
-      result = result + rhs;
+    switch (token.token_kind) {
+      case TokenKind::kOtherPlus:
+        result = result + rhs;
+        break;
+
+      case TokenKind::kOtherMinus:
+        result = result - rhs;
+        break;
+
+      case TokenKind::kOtherAsterisk:
+        result = result * rhs;
+        break;
+
+      case TokenKind::kOtherSlash:
+        result = result / rhs;
+        break;
+
+      default:
+        throw InterpreterErr(InterpreterErrKind::kInvalidToken);
     }
 
-    else if (token.token_kind == TokenKind::kOtherMinus) {
-      result = result - rhs;
-    }
-
-    else if (token.token_kind == TokenKind::kOtherAsterisk) {
-      result = result * rhs;
-    }
-
-    else if (token.token_kind == TokenKind::kOtherSlash) {
-      result = result / rhs;
-    }
-
-    else {
-      throw InterpreterErr(InterpreterErrKind::kInvalidToken);
-    }
-
-    // Interpreter::iter_++;
+    Interpreter::iter_++;
   }
 
   return result;

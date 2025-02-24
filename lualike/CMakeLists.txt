@@ -30,7 +30,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(lualike_test lexer_test.cpp )
+add_executable(lualike_test lexer_test.cpp interpreter_test.cpp)
 target_link_libraries(lualike_test GTest::gtest_main lualike)
 
 include(GoogleTest)

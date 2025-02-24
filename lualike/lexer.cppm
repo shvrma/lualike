@@ -50,9 +50,9 @@ class Lexer {
   std::string token_data_accumulator_;
   static constexpr int kMaxOutputAccumLength = 16;
 
-  explicit Lexer(const InputT &&input) noexcept;
+  explicit Lexer(InputT &&input);
 
-  void ConsumeComment();
+  void ConsumeComment() noexcept;
 
   // Pre: single alphabetic symbol or undescore in accumulator.
   Token ReadAlphanumeric();
@@ -64,18 +64,15 @@ class Lexer {
   // Pre: single digit is in accumulator.
   Token ReadNumericConstant();
 
-  std::generator<const Token &> ReadTokens();
-
  public:
   // Iterates the contained ranged of symbols till syntatically valid token is
   // found, then returning it.
   // Supposedly, the input should be valid. Lexer recognizes errors, but in the
   // case of recognition, a LexerErr is thrown.
-  static auto Tokenize(const InputT &&input)
-      -> std::ranges::owning_view<std::generator<const Token &>>;
+  static std::generator<const Token &> ReadTokens(InputT &&input);
 };
 
-namespace {
+// namespace {
 
 template <auto next_array_size>
 struct Vertex {
@@ -85,7 +82,7 @@ struct Vertex {
   constexpr Vertex() noexcept { std::ranges::fill(Vertex::next, -1); }
 };
 
-}  // namespace
+// }  // namespace
 
 constexpr auto kKeywordsTrie = []() consteval {
   constexpr int kAlphabetSize = 26;
@@ -234,8 +231,20 @@ LexerErr::LexerErr(LexerErrKind error_kind) noexcept : error_kind(error_kind) {}
 
 template <typename InputT>
   requires InputTRequirements<InputT>
-Lexer<InputT>::Lexer(const InputT &&input) noexcept
+Lexer<InputT>::Lexer(InputT &&input)
     : iter_(std::ranges::cbegin(input)), sentinel_(std::ranges::cend(input)) {}
+
+template <typename InputT>
+  requires InputTRequirements<InputT>
+inline void Lexer<InputT>::ConsumeComment() noexcept {
+  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+    char symbol = *Lexer::iter_;
+
+    if (symbol == '\n') {
+      return;
+    }
+  }
+}
 
 template <typename InputT>
   requires InputTRequirements<InputT>
@@ -496,51 +505,49 @@ Token Lexer<InputT>::ReadNumericConstant() {
 
 template <typename InputT>
   requires InputTRequirements<InputT>
-void Lexer<InputT>::ConsumeComment() {
-  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
-    char symbol = *Lexer::iter_;
+std::generator<const Token &> Lexer<InputT>::ReadTokens(InputT &&input) {
+  Lexer<InputT> lexer(std::move(input));
 
-    if (symbol == '\n') {
-      return;
-    }
-  }
-}
-
-template <typename InputT>
-  requires InputTRequirements<InputT>
-std::generator<const Token &> Lexer<InputT>::ReadTokens() {
-  while (Lexer::iter_ != Lexer::sentinel_) {
-    char symbol = *Lexer::iter_;
-    Lexer::iter_++;
+  while (lexer.iter_ != lexer.sentinel_) {
+    char symbol = *lexer.iter_;
+    lexer.iter_++;
 
     if (IsSpace(symbol)) {
       continue;
     }
 
-    Lexer::token_data_accumulator_ = {};
+    lexer.token_data_accumulator_ = {};
 
-    if (symbol == '\'' || symbol == '\"') {
-      co_yield Lexer::ReadShortLiteralString(symbol);
-    }
+    if (symbol == '-') {
+      if (lexer.iter_ == lexer.sentinel_) {
+        throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+      }
 
-    else if (symbol == '_' || IsAlphabetic(symbol)) {
-      Lexer::token_data_accumulator_ += symbol;
-      co_yield Lexer::ReadAlphanumeric();
-    }
-
-    else if (IsOther(symbol)) {
-      if (symbol == '-' && *Lexer::iter_ == '-') {
-        Lexer::ConsumeComment();
+      if (*lexer.iter_ == '-') {
+        lexer.ConsumeComment();
         continue;
       }
 
-      Lexer::token_data_accumulator_ += symbol;
-      co_yield Lexer::ReadOtherToken();
+      co_yield lexer.ReadOtherToken();
+    }
+
+    else if (symbol == '\'' || symbol == '\"') {
+      co_yield lexer.ReadShortLiteralString(symbol);
+    }
+
+    else if (symbol == '_' || IsAlphabetic(symbol)) {
+      lexer.token_data_accumulator_ += symbol;
+      co_yield lexer.ReadAlphanumeric();
+    }
+
+    else if (IsOther(symbol)) {
+      lexer.token_data_accumulator_ += symbol;
+      co_yield lexer.ReadOtherToken();
     }
 
     else if (IsNumeric(symbol)) {
-      Lexer::token_data_accumulator_ += symbol;
-      co_yield Lexer::ReadNumericConstant();
+      lexer.token_data_accumulator_ += symbol;
+      co_yield lexer.ReadNumericConstant();
     }
 
     else {
@@ -549,14 +556,6 @@ std::generator<const Token &> Lexer<InputT>::ReadTokens() {
   }
 
   co_return;
-}
-
-template <typename InputT>
-  requires InputTRequirements<InputT>
-auto Lexer<InputT>::Tokenize(const InputT &&input)
-    -> std::ranges::owning_view<std::generator<const Token &>> {
-  Lexer<InputT> lexer(std::move(input));
-  return {lexer.ReadTokens()};
 }
 
 }  // namespace lualike::lexer

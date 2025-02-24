@@ -4,6 +4,7 @@
 #include <ranges>
 #include <string_view>
 #include <vector>
+#include <generator>
 
 import lualike.lexer;
 
@@ -37,7 +38,7 @@ TEST_P(LexerTest, ReadAndCompareWithGiven) {
   std::vector<Token> actual_sequence{};
   try {
     std::ranges::copy(
-        Lexer<std::string_view>::Tokenize(std::string_view{input}),
+        Lexer<std::string_view>::ReadTokens(std::string_view{input}),
         std::back_inserter(actual_sequence));
   } catch (LexerErr& err) {
     FAIL() << "Failed with err: " << static_cast<int>(err.error_kind);
