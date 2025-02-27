@@ -2,41 +2,57 @@
 
 #include <generator>
 #include <string_view>
+#include <utility>
 
 import lualike.interpreter;
-import lualike.value;
 
-namespace interpreter = lualike::interpreter;
-using interpreter::Interpreter;
+namespace lualike::value {
+
+void PrintTo(const LualikeValue& value, std::ostream* output_stream) {
+  *output_stream << value.ToString();
+}
+
+}  // namespace lualike::value
+
+namespace lualike::interpreter {
+
+using lualike::lexer::Lexer;
 
 namespace value = lualike::value;
-// using value::LualikeValue;
+using value::LualikeValue;
 using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
 
-using InterpreterTestParamT = std::pair<std::string_view, value::LualikeValue>;
+using InterpreterTestParamT = std::pair<std::string_view, LualikeValue>;
 
 class InterpreterTest : public testing::TestWithParam<InterpreterTestParamT> {};
 
-TEST_P(InterpreterTest, ReadAndCompareWithGiven) {
-  const auto &[input, expected_evaluation_result] = InterpreterTest::GetParam();
+TEST_P(InterpreterTest, EvaluateAndCompareWithValid) {
+  const auto& [input, expected_result] = InterpreterTest::GetParam();
 
-  auto interpreter = Interpreter(std::string_view{input});
-  const auto actual_evaluation_result = interpreter.EvaluateExpression();
+  Lexer<std::string_view> lexer(input);
+  auto tokens_r = lexer.ReadTokens();
+  auto interpreter = Interpreter(tokens_r);
 
-  ASSERT_EQ(actual_evaluation_result, expected_evaluation_result);
+  const auto actual_result = interpreter.EvaluateExpression();
+
+  ASSERT_EQ(actual_result, expected_result)
+      << "Actual result: " << actual_result.ToString();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    TestValidInputs, InterpreterTest,
-    testing::ValuesIn(std::to_array<InterpreterTestParamT>({
-        {"1", 1_lua_int},
-        {"1 + 2", 3_lua_int},
-        {"(1 + 2) + 3", 6_lua_int},
-        {"2 * 2", 4_lua_int},
-        {"(2 * 2)", 4_lua_int},
-        {"(2 * 2) + 2", 6_lua_int},
-        {"2 * 2 + 2", 6_lua_int},
-        {"6 / 2", 3_lua_int},
-    })));
+const InterpreterTestParamT kSingleDigit = {"1", 1_lua_int};
+
+const InterpreterTestParamT kMultipleDigits = {"11111", 11111_lua_int};
+
+const InterpreterTestParamT kFloat = {"3.14", 3.14_lua_float};
+
+const InterpreterTestParamT kSimpleExpression = {"1 + 2 + 3", 6_lua_int};
+
+const InterpreterTestParamT kHarderExpression = {"2 + 2 * 2", 6_lua_int};
+
+INSTANTIATE_TEST_SUITE_P(TestValidInputs, InterpreterTest,
+                         testing::Values(kSingleDigit, kMultipleDigits,
+                                         kSimpleExpression, kHarderExpression));
+
+}  // namespace lualike::interpreter

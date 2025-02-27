@@ -75,9 +75,7 @@ export struct Token {
   TokenKind token_kind;
   std::optional<LualikeValue> token_data;
 
-  bool operator==(const Token &) const = default;
-
-  std::string ToString() const noexcept;
+  bool operator==(const Token& rhs) const = default;
 };
 
 export constexpr auto kKeywordsMap =
@@ -133,77 +131,5 @@ export constexpr auto kOtherTokensMap =
         {",", TokenKind::kOtherComma},
         {".", TokenKind::kOtherDot},
     });
-
-export const std::unordered_map<TokenKind, uint8_t> kBinOpsPrecedences = {{
-    {TokenKind::kKeywordOr, 1},
-
-    {TokenKind::kKeywordAnd, 2},
-
-    {TokenKind::kOtherLessThan, 3},
-    {TokenKind::kOtherGreaterThan, 3},
-    {TokenKind::kOtherLessThanEqual, 3},
-    {TokenKind::kOtherGreaterThanEqual, 3},
-    {TokenKind::kOtherTildeEqual, 3},
-    {TokenKind::kOtherDoubleEqual, 3},
-
-    {TokenKind::kOtherPlus, 9},
-    {TokenKind::kOtherMinus, 9},
-
-    {TokenKind::kOtherAsterisk, 10},
-    {TokenKind::kOtherSlash, 10},
-    {TokenKind::kOtherDoubleSlash, 10},
-    {TokenKind::kOtherPercent, 10},
-
-    {TokenKind::kOtherCaret, 11},
-}};
-
-export const std::array kUnaryOpsList =
-    std::to_array<TokenKind>({TokenKind::kKeywordNot, TokenKind::kOtherMinus});
-
-std::string Token::ToString() const noexcept {
-  std::ostringstream output{};
-
-  const auto token_kind_name = [this]() -> std::string {
-    switch (Token::token_kind) {
-      case TokenKind::kNone:
-        return "none";
-
-      case TokenKind::kName:
-        return "name";
-
-      case TokenKind::kLiteral:
-        return "literal";
-
-      default:
-        break;
-    }
-
-    const auto *find_result = std::ranges::find_if(
-        token::kKeywordsMap,
-        [this](const auto &pair) { return pair.second == Token::token_kind; });
-    if (find_result != std::ranges::end(kKeywordsMap)) {
-      return std::string{find_result->first};
-    }
-
-    find_result =
-        std::ranges::find_if(kOtherTokensMap, [this](const auto &pair) {
-          return std::get<1>(pair) == Token::token_kind;
-        });
-    if (find_result != std::ranges::end(kOtherTokensMap)) {
-      return std::format("symbol: <<< {} >>>", find_result->first);
-    }
-
-    return std::format("unknown: <<< {} >>>",
-                       static_cast<int>(Token::token_kind));
-  }();
-
-  output << token_kind_name;
-
-  if (Token::token_data.has_value()) {
-    output << " <<< " << Token::token_data.value().ToString() << " >>>";
-  }
-
-  return output.str();
-}
 
 }  // namespace lualike::token

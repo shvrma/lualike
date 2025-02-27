@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <generator>
+#include <iterator>
 #include <ranges>
 #include <string_view>
 #include <vector>
-#include <generator>
 
 import lualike.lexer;
+
+namespace lualike::lexer {
 
 namespace token = lualike::token;
 using token::Token;
@@ -18,16 +21,6 @@ using value::operator""_lua_int;
 using value::operator""_lua_float;
 using value::operator""_lua_str;
 
-namespace lualike::token {
-
-void PrintTo(const token::Token& token, std::ostream* output_stream) {
-  *output_stream << token.ToString();
-}
-
-}  // namespace lualike::token
-
-namespace lualike::lexer {
-
 using LexerTestParamT = std::pair<std::string_view, std::vector<Token>>;
 
 class LexerTest : public testing::TestWithParam<LexerTestParamT> {};
@@ -35,22 +28,16 @@ class LexerTest : public testing::TestWithParam<LexerTestParamT> {};
 TEST_P(LexerTest, ReadAndCompareWithGiven) {
   const auto& [input, expected_sequence] = LexerTest::GetParam();
 
-  std::vector<Token> actual_sequence{};
+  Lexer<std::string_view> lexer(input);
   try {
-    std::ranges::copy(
-        Lexer<std::string_view>::ReadTokens(std::string_view{input}),
-        std::back_inserter(actual_sequence));
-  } catch (LexerErr& err) {
-    FAIL() << "Failed with err: " << static_cast<int>(err.error_kind);
+    const auto actual_sequence =
+        lexer.ReadTokens() | std::ranges::to<std::vector<Token>>();
+    ASSERT_EQ(actual_sequence, expected_sequence);
   }
 
-  const auto actual_stringified =
-      actual_sequence | std::views::transform([](const auto& token) {
-        return token.ToString();
-      }) |
-      std::views::join_with(';') | std::ranges::to<std::string>();
-  ASSERT_TRUE(std::ranges::equal(actual_sequence, expected_sequence))
-      << "Actual readed: " << actual_stringified;
+  catch (LexerErr& err) {
+    FAIL() << "Failed with err: " << static_cast<int>(err.error_kind);
+  }
 }
 
 const LexerTestParamT kSingleKeyword{"local",
