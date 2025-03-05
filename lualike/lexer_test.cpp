@@ -1,25 +1,19 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <generator>
-#include <iterator>
 #include <ranges>
 #include <string_view>
 #include <vector>
 
 import lualike.lexer;
 
-namespace lualike::lexer {
-
 namespace token = lualike::token;
 using token::Token;
 using token::TokenKind;
 
-namespace value = lualike::value;
-using value::LualikeValue;
-using value::operator""_lua_int;
-using value::operator""_lua_float;
-using value::operator""_lua_str;
+using namespace std::string_literals;
+
+namespace lualike::lexer {
 
 using LexerTestParamT = std::pair<std::string_view, std::vector<Token>>;
 
@@ -28,11 +22,16 @@ class LexerTest : public testing::TestWithParam<LexerTestParamT> {};
 TEST_P(LexerTest, ReadAndCompareWithGiven) {
   const auto& [input, expected_sequence] = LexerTest::GetParam();
 
-  Lexer<std::string_view> lexer(input);
   try {
-    const auto actual_sequence =
-        lexer.ReadTokens() | std::ranges::to<std::vector<Token>>();
-    ASSERT_EQ(actual_sequence, expected_sequence);
+    const auto actual_sequence = lexer::ReadTokens(std::string_view{input}) |
+                                 std::ranges::to<std::vector<Token>>();
+    ASSERT_EQ(actual_sequence, expected_sequence)
+        << "Actualy read: "
+        << (actual_sequence | std::views::transform([](const auto& token) {
+              return token.ToString();
+            }) |
+            std::views::join_with(std::string{"; "}) |
+            std::ranges::to<std::string>());
   }
 
   catch (LexerErr& err) {
@@ -40,54 +39,56 @@ TEST_P(LexerTest, ReadAndCompareWithGiven) {
   }
 }
 
-const LexerTestParamT kSingleKeyword{"local",
-                                     {Token{TokenKind::kKeywordLocal}}};
+const LexerTestParamT kSingleKeyword{"local", {{TokenKind::kKeywordLocal}}};
 
 const LexerTestParamT kMultipleKeywords{"local function and",
                                         {
-                                            Token{TokenKind::kKeywordLocal},
-                                            Token{TokenKind::kKeywordFunction},
-                                            Token{TokenKind::kKeywordAnd},
+                                            {TokenKind::kKeywordLocal},
+                                            {TokenKind::kKeywordFunction},
+                                            {TokenKind::kKeywordAnd},
                                         }};
 
-const LexerTestParamT kMultipleTokens{
-    "local empty_var = nil",
-    {
-        Token{TokenKind::kKeywordLocal},
-        Token{TokenKind::kName, "empty_var"_lua_str},
-        Token{TokenKind::kOtherEqual},
-        Token{TokenKind::kKeywordNil, LualikeValue(LualikeValue::NilT{})},
-    }};
+const LexerTestParamT kOtherToken{"local empty_var = nil",
+                                  {
+                                      {TokenKind::kKeywordLocal},
+                                      {TokenKind::kName, "empty_var"s},
+                                      {TokenKind::kOtherEqual},
+                                      {TokenKind::kKeywordNil},
+                                  }};
 
-const LexerTestParamT kLiteralToken{
+const LexerTestParamT kLiteral{
     "local fib_num_10 = 34",
-    {Token{TokenKind::kKeywordLocal},
-     Token{TokenKind::kName, "fib_num_10"_lua_str},
-     Token{TokenKind::kOtherEqual}, Token{TokenKind::kLiteral, 34_lua_int}}};
+    {{TokenKind::kKeywordLocal},
+     {TokenKind::kName, "fib_num_10"},
+     {TokenKind::kOtherEqual},
+     {TokenKind::kLiteral, value::LualikeValue{34}}}};
 
 const LexerTestParamT kConsecutiveOtherTokens{
     "local function empty_func() end",
     {
-        Token{TokenKind::kKeywordLocal},
-        Token{TokenKind::kKeywordFunction},
-        Token{TokenKind::kName, "empty_func"_lua_str},
-        Token{TokenKind::kOtherLeftParenthesis},
-        Token{TokenKind::kOtherRightParenthesis},
-        Token{TokenKind::kKeywordEnd},
+        {TokenKind::kKeywordLocal},
+        {TokenKind::kKeywordFunction},
+        {TokenKind::kName, "empty_func"},
+        {TokenKind::kOtherLeftParenthesis},
+        {TokenKind::kOtherRightParenthesis},
+        {TokenKind::kKeywordEnd},
     }};
 
 const LexerTestParamT kStatementWithComment{
     "-- Very meaningfull variable\n\r"
     "local curr_year = \'2025\'",
-    {Token{TokenKind::kKeywordLocal},
-     Token{TokenKind::kName, "curr_year"_lua_str},
-     Token{TokenKind::kOtherEqual},
-     Token{TokenKind::kLiteral, "2025"_lua_str}}};
+    {{TokenKind::kKeywordLocal},
+     {TokenKind::kName, "curr_year"},
+     {TokenKind::kOtherEqual},
+     {TokenKind::kLiteral, value::LualikeValue{"2025"}}}};
+
+const LexerTestParamT kSingleNum{
+    "1", {{TokenKind::kLiteral, value::LualikeValue{1}}}};
 
 INSTANTIATE_TEST_SUITE_P(TestValidInputs, LexerTest,
                          testing::Values(kSingleKeyword, kMultipleKeywords,
-                                         kMultipleTokens, kLiteralToken,
+                                         kOtherToken, kLiteral,
                                          kConsecutiveOtherTokens,
-                                         kStatementWithComment));
+                                         kStatementWithComment, kSingleNum));
 
 }  // namespace lualike::lexer

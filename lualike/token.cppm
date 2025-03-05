@@ -2,21 +2,19 @@ module;
 
 #include <array>
 #include <cstdint>
-#include <format>
-#include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_map>
+#include <variant>
 
 export module lualike.token;
 
 export import lualike.value;
 
-namespace lualike::token {
+namespace value = lualike::value;
 
-using lualike::value::LualikeValue;
+export namespace lualike::token {
 
-export enum class TokenKind : uint8_t {
+enum class TokenKind : uint8_t {
   kNone,
 
   kName,  // Same as identifier
@@ -71,14 +69,16 @@ export enum class TokenKind : uint8_t {
   kOtherDot,
 };
 
-export struct Token {
+struct Token {
   TokenKind token_kind;
-  std::optional<LualikeValue> token_data;
+  std::variant<std::monostate, std::string, value::LualikeValue> token_data;
 
-  bool operator==(const Token& rhs) const = default;
+  bool operator==(const Token &rhs) const = default;
+
+  std::string ToString() const noexcept;
 };
 
-export constexpr auto kKeywordsMap =
+constexpr auto kKeywordsMap =
     std::to_array<std::pair<std::string_view, TokenKind>>({
         {"and", TokenKind::kKeywordAnd},
         {"break", TokenKind::kKeywordBreak},
@@ -104,7 +104,7 @@ export constexpr auto kKeywordsMap =
         {"while", TokenKind::kKeywordWhile},
     });
 
-export constexpr auto kOtherTokensMap =
+constexpr auto kOtherTokensMap =
     std::to_array<std::pair<std::string_view, TokenKind>>({
         {"+", TokenKind::kOtherPlus},
         {"-", TokenKind::kOtherMinus},
@@ -131,5 +131,60 @@ export constexpr auto kOtherTokensMap =
         {",", TokenKind::kOtherComma},
         {".", TokenKind::kOtherDot},
     });
+
+std::string Token::ToString() const noexcept {
+  std::ostringstream output{};
+
+  const auto token_kind_name = [this]() -> std::string {
+    switch (Token::token_kind) {
+      case TokenKind::kNone:
+        return "none";
+
+      case TokenKind::kName:
+        return "name";
+
+      case TokenKind::kLiteral:
+        return "literal";
+
+      default:
+        break;
+    }
+
+    if (const auto &find_result =
+            std::ranges::find_if(token::kKeywordsMap,
+                                 [this](const auto &pair) {
+                                   return pair.second == Token::token_kind;
+                                 });
+        find_result != std::ranges::end(kKeywordsMap)) {
+      return std::string{find_result->first};
+    }
+
+    if (const auto &find_result = std::ranges::find_if(
+            kOtherTokensMap,
+            [this](const auto &pair) {
+              return std::get<1>(pair) == Token::token_kind;
+            });
+        find_result != std::ranges::end(kOtherTokensMap)) {
+      return std::format("symbol: <<< {} >>>", find_result->first);
+    }
+
+    return std::format("unknown: <<< {} >>>",
+                       static_cast<int>(Token::token_kind));
+  }();
+
+  output << token_kind_name;
+
+  if (std::holds_alternative<std::string>(Token::token_data)) {
+    output << " <<< " << std::get<std::string>(Token::token_data) << " >>>";
+  }
+
+  else if (std::holds_alternative<value::LualikeValue>(Token::token_data)) {
+    output << " <<< "
+           << std::get<value::LualikeValue>(Token::token_data).ToString()
+           << " >>>";
+  }
+
+  return output.str();
+}
 
 }  // namespace lualike::token
