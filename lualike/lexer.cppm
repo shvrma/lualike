@@ -1,5 +1,9 @@
 module;
 
+#include <frozen/string.h>
+#include <frozen/unordered_map.h>
+#include <frozen/unordered_set.h>
+
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
@@ -8,7 +12,6 @@ module;
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
-#include <vector>
 
 export module lualike.lexer;
 
@@ -20,13 +23,14 @@ namespace value = lualike::value;
 export namespace lualike::lexer {
 
 enum class LexerErrKind : uint8_t {
-  kEOF,
-  kInvalidSymbolMet,
   kTooLongToken,
   kUnclosedStringLiteral,
   kUnrecognizedEscapeSequence,
   kInvalidNumber,
   kInvalidName,
+  kInvalidString,
+  kInvalidOtherToken,
+  kInvalidSymbol,
 };
 
 struct LexerErr : std::exception {
@@ -37,7 +41,7 @@ struct LexerErr : std::exception {
 
 template <typename InputT>
 concept InputTRequirements =
-    std::ranges::input_range<InputT> &&
+    std::ranges::input_range<InputT> && std::ranges::borrowed_range<InputT> &&
     std::same_as<char, std::ranges::range_value_t<InputT>>;
 
 template <typename InputT>
@@ -72,115 +76,19 @@ class Lexer {
   std::optional<token::Token> NextToken();
 };
 
+using TokensRangeT = std::generator<token::Token>;
+
 template <typename InputT>
   requires InputTRequirements<InputT>
-std::generator<const token::Token&> ReadTokens(InputT&& input);
-
-}  // namespace lualike::lexer
-
-namespace lualike::lexer {
+TokensRangeT ReadTokens(InputT&& input);
 
 constexpr int kMaxOutputAccumLength = 16;
 
-using VertexIdxT = int8_t;
-
-template <auto next_array_size>
-struct Vertex {
-  std::array<VertexIdxT, next_array_size> next;
-  token::TokenKind output = token::TokenKind::kNone;
-
-  constexpr Vertex() noexcept { std::ranges::fill(Vertex::next, -1); }
-};
-
-const auto kKeywordsTrie = [] {
-  constexpr int kAlphabetSize = 26;
-  std::vector<Vertex<kAlphabetSize>> trie{};
-  trie.push_back({});
-
-  for (const auto& [word, token_kind] : token::kKeywordsMap) {
-    VertexIdxT current_node = 0;
-
-    for (const char symbol : word) {
-      const VertexIdxT idx = static_cast<int8_t>(symbol - 'a');
-
-      if (trie.at(current_node).next.at(idx) == -1) {
-        trie.at(current_node).next.at(idx) =
-            static_cast<VertexIdxT>(trie.size());
-        trie.push_back({});
-      }
-
-      current_node = trie.at(current_node).next.at(idx);
-    }
-
-    trie.at(current_node).output = token_kind;
-  }
-
-  return trie;
-}();
-
-const auto kOtherTokensMaxLength = std::ranges::max(
-    token::kOtherTokensMap | std::views::keys |
-    std::views::transform([](const auto& str) { return str.length(); }));
-
-const auto kOtherTokensAlphabet = [] {
-  const auto all_symbols =
-      token::kOtherTokensMap | std::views::keys | std::views::join;
-
-  std::vector<char> alphabet{};
-
-  for (const char symbol : all_symbols) {
-    if (not std::ranges::contains(alphabet, symbol)) {
-      alphabet.push_back(symbol);
-    }
-  }
-
-  return alphabet;
-}();
-
-// Prime numbers list: 11, 13, 17, 19, 23, 29, 31, 37, 41.
-constexpr VertexIdxT kModuloDivisitorOfHashFunction = 37;
-
-constexpr VertexIdxT OtherTokensHashFunc(const char symbol) noexcept {
-  return static_cast<VertexIdxT>(symbol % kModuloDivisitorOfHashFunction);
-}
-
-const auto kOtherTokensTrie = [] {
-  // Validate hash function.
-  std::vector<VertexIdxT> hashes{};
-  std::ranges::copy(kOtherTokensAlphabet |
-                        std::views::transform([](const char symbol) constexpr {
-                          return OtherTokensHashFunc(symbol);
-                        }),
-                    std::back_inserter(hashes));
-
-  std::ranges::sort(hashes);
-  if (std::ranges::adjacent_find(hashes) != hashes.end()) {
-    throw std::invalid_argument("Hash function doesnt produce unique values");
-  }
-
-  std::vector<Vertex<kModuloDivisitorOfHashFunction>> trie{};
-  trie.push_back({});
-
-  for (const auto& [token, token_kind] : token::kOtherTokensMap) {
-    VertexIdxT current_node = 0;
-
-    for (const char symbol : std::string_view{token}) {
-      const auto idx = OtherTokensHashFunc(symbol);
-
-      if (trie.at(current_node).next.at(idx) == -1) {
-        trie.at(current_node).next.at(idx) =
-            static_cast<VertexIdxT>(trie.size());
-        trie.push_back({});
-      }
-
-      current_node = trie.at(current_node).next.at(idx);
-    }
-
-    trie.at(current_node).output = token_kind;
-  }
-
-  return trie;
-}();
+const auto kOtherTokensMaxLength =
+    std::ranges::max(token::kOtherTokensMap | std::views::keys |
+                     std::views::transform([](const auto& str) {
+                       return static_cast<int>(str.size());
+                     }));
 
 inline bool IsSpace(const char symbol) noexcept {
   return symbol == ' ' || symbol == '\f' || symbol == '\n' || symbol == '\r' ||
@@ -198,6 +106,17 @@ inline bool IsNumeric(const char symbol) noexcept {
 inline bool IsAlphanumeric(const char symbol) noexcept {
   return IsAlphabetic(symbol) || IsNumeric(symbol);
 }
+
+constexpr auto kOtherTokensAlphabet = frozen::make_unordered_set(
+    std::to_array<char>({'+', '-', '*', '/', '%', '^', '=', '~', '<', '>',
+                         '(', ')', '{', '}', '[', ']', ';', ':', ',', '.'}));
+static_assert(std::ranges::all_of(token::kOtherTokensMap | std::views::keys |
+                                      std::views::join,
+                                  [](const char symb) {
+                                    return std::ranges::contains(
+                                        kOtherTokensAlphabet, symb);
+                                  }),
+              "Alphabet is not complete!");
 
 inline bool IsOther(const char symbol) noexcept {
   return std::ranges::contains(kOtherTokensAlphabet, symbol);
@@ -223,43 +142,33 @@ template <typename InputT>
 token::Token Lexer<InputT>::ReadAlphanumeric() {
   while (Lexer::iter_ != Lexer::sentinel_) {
     char symbol = *Lexer::iter_;
-    Lexer::iter_++;
 
     if (IsAlphanumeric(symbol) || symbol == '_') {
       if (Lexer::token_data_accumulator_.length() == kMaxOutputAccumLength) {
         throw LexerErr(LexerErrKind::kTooLongToken);
       }
 
+      Lexer::iter_++;
       Lexer::token_data_accumulator_ += symbol;
-      continue;
     }
 
-    if (IsSpace(symbol) || IsOther(symbol)) {
+    else {
       break;
     }
-
-    throw LexerErr(LexerErrKind::kInvalidName);
   }
 
   const auto match_result = [this] {
-    VertexIdxT vertex_idx = 0;
+    const auto& find_result = token::kKeywordsMap.find(
+        frozen::string{Lexer::token_data_accumulator_});
 
-    for (const char symbol : Lexer::token_data_accumulator_) {
-      if (symbol < 'a' || symbol > 'z') {
-        return token::TokenKind::kNone;
-      }
-
-      vertex_idx = kKeywordsTrie.at(vertex_idx).next.at(symbol - 'a');
-
-      if (vertex_idx == -1) {
-        return token::TokenKind::kNone;
-      }
+    if (find_result != token::kKeywordsMap.cend()) {
+      return find_result->second;
     }
 
-    return kKeywordsTrie.at(vertex_idx).output;
+    return token::TokenKind::kName;
   }();
 
-  if (match_result != token::TokenKind::kNone) {
+  if (match_result != token::TokenKind::kName) {
     return token::Token{.token_kind = match_result};
   }
 
@@ -271,56 +180,48 @@ template <typename InputT>
   requires InputTRequirements<InputT>
 token::Token Lexer<InputT>::ReadOtherToken() {
   const auto try_match = [this] {
-    VertexIdxT vertex_idx = 0;
+    const auto& find_result = token::kOtherTokensMap.find(
+        frozen::string{Lexer::token_data_accumulator_});
 
-    for (const char symbol : Lexer::token_data_accumulator_) {
-      vertex_idx =
-          kOtherTokensTrie.at(vertex_idx).next.at(OtherTokensHashFunc(symbol));
-
-      if (vertex_idx == -1) {
-        return token::TokenKind::kNone;
-      }
+    if (find_result != token::kOtherTokensMap.cend()) {
+      return find_result->second;
     }
 
-    return kOtherTokensTrie.at(vertex_idx).output;
+    return token::TokenKind::kNone;
   };
 
   while (Lexer::iter_ != Lexer::sentinel_) {
     char symbol = *Lexer::iter_;
-    Lexer::iter_++;
 
     if (IsOther(symbol)) {
       if (Lexer::token_data_accumulator_.length() == kOtherTokensMaxLength) {
-        throw LexerErr(LexerErrKind::kTooLongToken);
+        break;
       }
 
       token::TokenKind first_match_result = try_match();
 
       Lexer::token_data_accumulator_ += symbol;
+
       token::TokenKind second_match_result = try_match();
 
       if (first_match_result != token::TokenKind::kNone &&
           second_match_result == token::TokenKind::kNone) {
-        return token::Token{.token_kind = first_match_result};
+        return {.token_kind = first_match_result};
       }
 
-      continue;
-    }
-
-    if (IsSpace(symbol) || IsAlphanumeric(symbol)) {
+      Lexer::iter_++;
+    } else {
       break;
     }
-
-    throw LexerErr(LexerErrKind::kInvalidSymbolMet);
   }
 
   token::TokenKind match_result = try_match();
 
   if (match_result != token::TokenKind::kNone) {
-    return token::Token{.token_kind = match_result};
+    return {.token_kind = match_result};
   }
 
-  throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+  throw LexerErr(LexerErrKind::kInvalidOtherToken);
 }
 
 template <typename InputT>
@@ -371,7 +272,7 @@ token::Token Lexer<InputT>::ReadShortLiteralString(char delimiter) {
           break;
 
         default:
-          throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+          throw LexerErr(LexerErrKind::kUnrecognizedEscapeSequence);
       }
 
       is_escaped = false;
@@ -381,10 +282,6 @@ token::Token Lexer<InputT>::ReadShortLiteralString(char delimiter) {
     if (symbol == '\\') {
       is_escaped = true;
       continue;
-    }
-
-    if (symbol == '\n') {
-      throw LexerErr(LexerErrKind::kUnrecognizedEscapeSequence);
     }
 
     if (symbol == delimiter) {
@@ -404,29 +301,23 @@ template <typename InputT>
 token::Token Lexer<InputT>::ReadNumericConstant() {
   bool has_met_fractional_part = false;
 
-  for (; Lexer::iter_ != Lexer::sentinel_; Lexer::iter_++) {
+  while (Lexer::iter_ != Lexer::sentinel_) {
     char symbol = *Lexer::iter_;
-
-    if (IsNumeric(symbol)) {
-      Lexer::token_data_accumulator_ += symbol;
-      continue;
-    }
 
     if (symbol == '.' || symbol == ',') {
       if (has_met_fractional_part) {
-        throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+        throw LexerErr(LexerErrKind::kInvalidNumber);
       }
 
-      Lexer::token_data_accumulator_ += symbol;
       has_met_fractional_part = true;
-      continue;
     }
 
-    if (IsSpace(symbol) || IsOther(symbol)) {
+    else if (!IsNumeric(symbol)) {
       break;
     }
 
-    throw LexerErr(LexerErrKind::kInvalidNumber);
+    Lexer::iter_++;
+    Lexer::token_data_accumulator_ += symbol;
   }
 
   const auto make_num = [this](auto value_t) {
@@ -435,9 +326,9 @@ token::Token Lexer<InputT>::ReadNumericConstant() {
     const auto& str_begin = Lexer::token_data_accumulator_.data();
     const auto& str_size = Lexer::token_data_accumulator_.size();
     auto [ptr, ec] = std::from_chars(str_begin, str_begin + str_size, num);
-    if (ec != std::errc() || ptr != str_begin + str_size) {
-      throw LexerErr(LexerErrKind::kInvalidNumber);
-    }
+    // if (ec != std::errc() || ptr != str_begin + str_size) {
+    //   throw LexerErr(LexerErrKind::kInvalidNumber);
+    // }
 
     return num;
   };
@@ -456,48 +347,64 @@ token::Token Lexer<InputT>::ReadNumericConstant() {
 template <typename InputT>
   requires InputTRequirements<InputT>
 std::optional<token::Token> Lexer<InputT>::NextToken() {
-  while (iter_ != sentinel_ && IsSpace(*iter_)) {
-    ++iter_;
+  while (Lexer::iter_ != Lexer::sentinel_ && IsSpace(*Lexer::iter_)) {
+    Lexer::iter_++;
   }
 
-  if (iter_ == sentinel_) {
+  if (Lexer::iter_ == Lexer::sentinel_) {
     return std::nullopt;
   }
 
-  token_data_accumulator_.clear();
+  Lexer::token_data_accumulator_.clear();
 
   char symbol = *iter_;
-  ++iter_;
+  Lexer::iter_++;
+
+  if (symbol == '-') {
+    if (Lexer::iter_ == Lexer::sentinel_) {
+      return std::nullopt;
+    }
+
+    char symbol = *Lexer::iter_;
+
+    if (symbol == '-') {
+      Lexer::ConsumeComment();
+      return Lexer::NextToken();
+    }
+
+    Lexer::token_data_accumulator_ += '-';
+    return Lexer::ReadOtherToken();
+  }
 
   if (symbol == '\'' || symbol == '\"') {
-    return ReadShortLiteralString(symbol);
+    return Lexer::ReadShortLiteralString(symbol);
   }
 
   if (symbol == '_' || IsAlphabetic(symbol)) {
     token_data_accumulator_ += symbol;
-    return ReadAlphanumeric();
+    return Lexer::ReadAlphanumeric();
   }
 
   if (IsOther(symbol)) {
     token_data_accumulator_ += symbol;
-    return ReadOtherToken();
+    return Lexer::ReadOtherToken();
   }
 
   if (IsNumeric(symbol)) {
     token_data_accumulator_ += symbol;
-    return ReadNumericConstant();
+    return Lexer::ReadNumericConstant();
   }
 
-  throw LexerErr(LexerErrKind::kInvalidSymbolMet);
+  throw LexerErr(LexerErrKind::kInvalidSymbol);
 }
 
 template <typename InputT>
   requires InputTRequirements<InputT>
-std::generator<const token::Token&> ReadTokens(InputT&& input) {
+TokensRangeT ReadTokens(InputT&& input) {
   Lexer<InputT> lexer(std::forward<InputT>(input));
 
   while (auto token = lexer.NextToken()) {
-    co_yield *token;
+    co_yield token.value();
   }
 }
 

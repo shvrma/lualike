@@ -16,22 +16,32 @@ namespace value = lualike::value;
 
 export namespace lualike::interpreter {
 
-enum class InterpreterErrKind : uint8_t { kEOF, kUnknownName, kInvalidToken };
+enum class InterpreterErrKind : uint8_t {
+  kEOF,
+  kUnknownName,
+  kExpectedExpressionAtom,
+  kUnclosedParanthesis,
+  kNormallyImpossibleErr,
+};
 
 struct InterpreterErr : std::exception {
   InterpreterErrKind error_kind;
 
-  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept;
+  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept
+      : error_kind(error_kind) {}
+
+  const char* what() const noexcept override {
+    return "Interpreter error occured!";
+  }
 };
 
 class Interpreter {
   std::unordered_map<std::string, value::LualikeValue> local_names_;
 
-  using TokensRangeT = std::generator<const token::Token&>;
-  std::ranges::const_iterator_t<TokensRangeT> iter_;
-  std::ranges::const_sentinel_t<TokensRangeT> sentinel_;
+  std::ranges::const_iterator_t<lexer::TokensRangeT> iter_;
+  std::ranges::const_sentinel_t<lexer::TokensRangeT> sentinel_;
 
-  explicit Interpreter(TokensRangeT&& tokens_range)
+  explicit Interpreter(lexer::TokensRangeT&& tokens_range)
       : iter_(std::ranges::cbegin(tokens_range)),
         sentinel_(std::ranges::cend(tokens_range)) {}
 
@@ -71,15 +81,12 @@ const std::unordered_map<token::TokenKind, int> kBinOpsPrecedences = {{
 
 namespace lualike::interpreter {
 
-InterpreterErr::InterpreterErr(InterpreterErrKind error_kind) noexcept
-    : error_kind(error_kind) {}
-
 value::LualikeValue Interpreter::ReadAtom() {
   if (Interpreter::iter_ == Interpreter::sentinel_) {
     throw InterpreterErr(InterpreterErrKind::kEOF);
   }
 
-  const auto& token = *Interpreter::iter_;
+  const auto token = *Interpreter::iter_;
   Interpreter::iter_++;
 
   switch (token.token_kind) {
@@ -97,19 +104,12 @@ value::LualikeValue Interpreter::ReadAtom() {
     case token::TokenKind::kLiteral:
       return std::get<value::LualikeValue>(token.token_data);
 
-      // case token::TokenKind::kOtherMinus:
-      //   // Unary minus operator
-      //   // return -(Interpreter::ReadAtom());
-      //   throw InterpreterErr(
-      //       InterpreterErrKind::kInvalidToken);  // Until operator- is
-      //       implemented
+    case token::TokenKind::kOtherMinus:
+      return -(Interpreter::ReadAtom());
 
-      // case token::TokenKind::kKeywordNot:
-      //   // Logical not operator
-      //   // return !(Interpreter::ReadAtom());
-      //   throw InterpreterErr(
-      //       InterpreterErrKind::kInvalidToken);  // Until operator! is
-      //       implemented
+    case token::TokenKind::kKeywordNot:
+      // Logical not operator
+      return !(Interpreter::ReadAtom());
 
     case token::TokenKind::kOtherLeftParenthesis: {
       const value::LualikeValue inner_value = Interpreter::ReadExpression(1);
@@ -120,7 +120,7 @@ value::LualikeValue Interpreter::ReadAtom() {
 
       if (const auto& token = *Interpreter::iter_;
           token.token_kind != token::TokenKind::kOtherRightParenthesis) {
-        throw InterpreterErr(InterpreterErrKind::kInvalidToken);
+        throw InterpreterErr(InterpreterErrKind::kUnclosedParanthesis);
       }
 
       Interpreter::iter_++;
@@ -129,7 +129,7 @@ value::LualikeValue Interpreter::ReadAtom() {
     }
 
     default:
-      throw InterpreterErr(InterpreterErrKind::kInvalidToken);
+      throw InterpreterErr(InterpreterErrKind::kExpectedExpressionAtom);
   }
 }
 
@@ -137,7 +137,7 @@ value::LualikeValue Interpreter::ReadExpression(const int min_precedence) {
   auto result = Interpreter::ReadAtom();
 
   while (Interpreter::iter_ != Interpreter::sentinel_) {
-    const auto& token = *Interpreter::iter_;
+    const auto token = *Interpreter::iter_;
 
     const auto find_result = kBinOpsPrecedences.find(token.token_kind);
     if (find_result == kBinOpsPrecedences.end()) {
@@ -149,38 +149,32 @@ value::LualikeValue Interpreter::ReadExpression(const int min_precedence) {
       break;
     }
 
-    int next_min_precendence = [precedence, min_precedence, &token] {
-      // Right associative op.
-      if (token.token_kind == token::TokenKind::kOtherCaret) {
-        return precedence;
-      }
-
-      return precedence + 1;
-    }();
-    const auto rhs = Interpreter::ReadExpression(next_min_precendence);
+    Interpreter::iter_++;
+    // Power operator is the only right-associative.
+    const auto rhs = Interpreter::ReadExpression(
+        (token.token_kind == token::TokenKind::kOtherCaret) ? precedence
+                                                            : precedence + 1);
 
     switch (token.token_kind) {
       case token::TokenKind::kOtherPlus:
-        result = result + rhs;
+        result += rhs;
         break;
 
       case token::TokenKind::kOtherMinus:
-        result = result - rhs;
+        result -= rhs;
         break;
 
       case token::TokenKind::kOtherAsterisk:
-        result = result * rhs;
+        result *= rhs;
         break;
 
       case token::TokenKind::kOtherSlash:
-        result = result / rhs;
+        result /= rhs;
         break;
 
       default:
-        return result;
+        throw InterpreterErr(InterpreterErrKind::kNormallyImpossibleErr);
     }
-
-    Interpreter::iter_++;
   }
 
   return result;

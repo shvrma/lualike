@@ -1,9 +1,13 @@
 module;
 
+#include <frozen/string.h>
+#include <frozen/unordered_map.h>
+
 #include <array>
 #include <cstdint>
+#include <format>
+#include <ranges>
 #include <sstream>
-#include <string>
 #include <variant>
 
 export module lualike.token;
@@ -75,11 +79,11 @@ struct Token {
 
   bool operator==(const Token &rhs) const = default;
 
-  std::string ToString() const noexcept;
+  std::string ToString() const;
 };
 
-constexpr auto kKeywordsMap =
-    std::to_array<std::pair<std::string_view, TokenKind>>({
+constexpr auto kKeywordsMap = frozen::make_unordered_map(
+    std::to_array<std::pair<frozen::string, TokenKind>>({
         {"and", TokenKind::kKeywordAnd},
         {"break", TokenKind::kKeywordBreak},
         {"do", TokenKind::kKeywordDo},
@@ -102,10 +106,10 @@ constexpr auto kKeywordsMap =
         {"true", TokenKind::kKeywordTrue},
         {"until", TokenKind::kKeywordUntil},
         {"while", TokenKind::kKeywordWhile},
-    });
+    }));
 
-constexpr auto kOtherTokensMap =
-    std::to_array<std::pair<std::string_view, TokenKind>>({
+constexpr auto kOtherTokensMap = frozen::make_unordered_map(
+    std::to_array<std::pair<frozen::string, TokenKind>>({
         {"+", TokenKind::kOtherPlus},
         {"-", TokenKind::kOtherMinus},
         {"*", TokenKind::kOtherAsterisk},
@@ -130,9 +134,9 @@ constexpr auto kOtherTokensMap =
         {":", TokenKind::kOtherColon},
         {",", TokenKind::kOtherComma},
         {".", TokenKind::kOtherDot},
-    });
+    }));
 
-std::string Token::ToString() const noexcept {
+std::string Token::ToString() const {
   std::ostringstream output{};
 
   const auto token_kind_name = [this]() -> std::string {
@@ -151,38 +155,41 @@ std::string Token::ToString() const noexcept {
     }
 
     if (const auto &find_result =
-            std::ranges::find_if(token::kKeywordsMap,
+            std::ranges::find_if(kKeywordsMap,
                                  [this](const auto &pair) {
                                    return pair.second == Token::token_kind;
                                  });
-        find_result != std::ranges::end(kKeywordsMap)) {
-      return std::string{find_result->first};
+        find_result != std::ranges::cend(kKeywordsMap)) {
+      return {find_result->first.data()};
     }
 
-    if (const auto &find_result = std::ranges::find_if(
-            kOtherTokensMap,
-            [this](const auto &pair) {
-              return std::get<1>(pair) == Token::token_kind;
-            });
-        find_result != std::ranges::end(kOtherTokensMap)) {
-      return std::format("symbol: <<< {} >>>", find_result->first);
+    if (const auto &find_result =
+            std::ranges::find_if(kOtherTokensMap,
+                                 [this](const auto &pair) {
+                                   return pair.second == Token::token_kind;
+                                 });
+        find_result != std::ranges::cend(kOtherTokensMap)) {
+      return std::format("other token <<< {} >>>", find_result->first.data());
     }
 
-    return std::format("unknown: <<< {} >>>",
-                       static_cast<int>(Token::token_kind));
+    return "unknown";
   }();
 
-  output << token_kind_name;
+  output << token_kind_name << ' ';
 
-  if (std::holds_alternative<std::string>(Token::token_data)) {
-    output << " <<< " << std::get<std::string>(Token::token_data) << " >>>";
-  }
+  std::visit(
+      [&output, this](auto &&value) {
+        using T = std::decay_t<decltype(value)>;
 
-  else if (std::holds_alternative<value::LualikeValue>(Token::token_data)) {
-    output << " <<< "
-           << std::get<value::LualikeValue>(Token::token_data).ToString()
-           << " >>>";
-  }
+        if constexpr (std::is_same<T, std::string>()) {
+          output << "<<< " << value << " >>>";
+        }
+
+        else if constexpr (std::is_same<T, value::LualikeValue>()) {
+          output << "<<< " << value.ToString() << " >>>";
+        }
+      },
+      Token::token_data);
 
   return output.str();
 }
