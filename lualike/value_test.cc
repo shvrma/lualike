@@ -25,7 +25,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
   EXPECT_FLOAT_EQ(std::get<LLV::FloatT>((LLV{2} / LLV{3}).inner_value),
                   2.0 / 3);
   EXPECT_EQ(LLV{5} % LLV{2}, LLV{1});
-  EXPECT_THAT(LLV{2}.Exponentiate(LLV{3}).inner_value,
+  EXPECT_THAT(Exponentiate(LLV{2}, LLV{3}).inner_value,
               VariantWith<FloatT>(DoubleEq(8.0)));
 
   // Operations on floats.
@@ -35,7 +35,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
   EXPECT_FLOAT_EQ(std::get<LLV::FloatT>((LLV{2.0} / LLV{3.0}).inner_value),
                   2.0 / 3);
   EXPECT_THROW({ LLV{2.0} % LLV{3.0}; }, LualikeValueOpErr);  // NOLINT
-  EXPECT_THAT(LLV{2.0}.Exponentiate(LLV{3.0}).inner_value,
+  EXPECT_THAT(Exponentiate(LLV{2.0}, LLV{3.0}).inner_value,
               VariantWith<FloatT>(DoubleEq(8.0)));
 
   // Operations on mixed numeric types.
@@ -45,7 +45,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
   EXPECT_FLOAT_EQ(std::get<LLV::FloatT>((LLV{2.0} / LLV{3}).inner_value),
                   2.0 / 3);
   EXPECT_THROW({ LLV{2} % LLV{3.0}; }, LualikeValueOpErr);  // NOLINT
-  EXPECT_THAT(LLV{2.0}.Exponentiate(LLV{3}).inner_value,
+  EXPECT_THAT(Exponentiate(LLV{2.0}, LLV{3}).inner_value,
               VariantWith<FloatT>(DoubleEq(8.0)));
 
   // Operations on mixed non-numeric types.
@@ -58,7 +58,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
       { LLV{true} / LLV{4.0}; },  // NOLINT
       LLVOpErr);
   EXPECT_THROW({ LLV{true} % LLV{5}; }, LLVOpErr);
-  EXPECT_THROW({ LLV{true}.Exponentiate(LLV{1}); }, LLVOpErr);
+  EXPECT_THROW({ Exponentiate(LLV{true}, LLV{1}); }, LLVOpErr);
 
   EXPECT_THROW({ LLV{-1} + LLV{"a"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{10} - LLV{"b"}; }, LLVOpErr);
@@ -66,7 +66,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
   EXPECT_THROW({ LLV{10} / LLV{"d"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{-1} % LLV{"e"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{10} % LLV{"f"}; }, LLVOpErr);
-  EXPECT_THROW({ LLV{-1}.Exponentiate(LLV{"g"}); }, LLVOpErr);
+  EXPECT_THROW({ Exponentiate(LLV{-1}, LLV{"g"}); }, LLVOpErr);
 
   EXPECT_THROW({ LLV{true} + LLV{"m"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{false} - LLV{"e"}; }, LLVOpErr);
@@ -74,7 +74,7 @@ TEST(OperatorsValidityTest, BinaryArithmeticOpsTest) {
   EXPECT_THROW({ LLV{false} / LLV{"s"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{true} % LLV{"a"}; }, LLVOpErr);
   EXPECT_THROW({ LLV{false} % LLV{"g"}; }, LLVOpErr);
-  EXPECT_THROW({ LLV{true}.Exponentiate(LLV{"e"}); }, LLVOpErr);
+  EXPECT_THROW({ Exponentiate(LLV{true}, LLV{"e"}); }, LLVOpErr);
 }
 
 TEST(OperatorsValidityTest, CumulativeBinaryArithmeticOpsTest) {

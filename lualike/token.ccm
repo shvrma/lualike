@@ -1,14 +1,13 @@
 module;
 
-#include <frozen/string.h>
-#include <frozen/unordered_map.h>
-
-#include <array>
 #include <cstdint>
 #include <format>
 #include <ranges>
 #include <sstream>
 #include <variant>
+
+#include "frozen/string.h"
+#include "frozen/unordered_map.h"
 
 export module lualike.token;
 
@@ -82,8 +81,8 @@ struct Token {
   std::string ToString() const;
 };
 
-constexpr auto kKeywordsMap = frozen::make_unordered_map(
-    std::to_array<std::pair<frozen::string, TokenKind>>({
+constexpr auto kKeywordsMap =
+    frozen::make_unordered_map<frozen::string, TokenKind>({
         {"and", TokenKind::kKeywordAnd},
         {"break", TokenKind::kKeywordBreak},
         {"do", TokenKind::kKeywordDo},
@@ -106,10 +105,10 @@ constexpr auto kKeywordsMap = frozen::make_unordered_map(
         {"true", TokenKind::kKeywordTrue},
         {"until", TokenKind::kKeywordUntil},
         {"while", TokenKind::kKeywordWhile},
-    }));
+    });
 
-constexpr auto kOtherTokensMap = frozen::make_unordered_map(
-    std::to_array<std::pair<frozen::string, TokenKind>>({
+constexpr auto kOtherTokensMap =
+    frozen::make_unordered_map<frozen::string, TokenKind>({
         {"+", TokenKind::kOtherPlus},
         {"-", TokenKind::kOtherMinus},
         {"*", TokenKind::kOtherAsterisk},
@@ -134,7 +133,7 @@ constexpr auto kOtherTokensMap = frozen::make_unordered_map(
         {":", TokenKind::kOtherColon},
         {",", TokenKind::kOtherComma},
         {".", TokenKind::kOtherDot},
-    }));
+    });
 
 std::string Token::ToString() const {
   std::ostringstream output{};

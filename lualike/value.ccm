@@ -1,0 +1,99 @@
+module;
+
+#include <cstdint>
+#include <exception>
+#include <string>
+#include <variant>
+
+export module lualike.value;
+
+export namespace lualike::value {
+
+enum class LualikeValueOpErrKind : uint8_t {
+  kInvalidOperandType,
+  kNormallyImpossibleErr,
+  kLhsNotNumeric,
+  kLhsNotBool,
+  kRhsNotNumeric,
+  kRhsNotBool,
+};
+
+// An exception type to be thrown in operations on LualikeValue. Clarification
+// on what happened is given by *error_kind* member, whose values are
+// self-descriptive.
+struct LualikeValueOpErr : std::exception {
+  LualikeValueOpErrKind error_kind;
+
+  explicit LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept
+      : error_kind(error_kind) {}
+};
+
+// export template <typename TokenType>
+// struct LualikeFunction {
+//   std::vector<TokenType> tokens;
+// };
+
+// Represents a single value during runtime. Note, though, that in *lualike*
+// values have types, and each type has a corresponding C++ type associated with
+// it. Underlying C++ types are aliased as *SomethingT* within this struct (e.g.
+// *Lualike::NilT* is alias to lualike nil type).
+struct LualikeValue {
+  using NilT = std::monostate;
+  using BoolT = bool;
+  using IntT = int64_t;
+  using FloatT = double;
+  using StringT = std::string;
+  // template <typename TokenType>
+  // using FuncT = LualikeFunction<TokenType>;
+
+  std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value{NilT{}};
+
+  friend bool operator==(const LualikeValue &, const LualikeValue &) = default;
+  friend auto operator<=>(const LualikeValue &, const LualikeValue &) = default;
+
+  std::string ToString() const;
+
+  LualikeValue operator+=(this LualikeValue &lhs, const LualikeValue &rhs);
+  LualikeValue operator-=(this LualikeValue &lhs, const LualikeValue &rhs);
+  LualikeValue operator*=(this LualikeValue &lhs, const LualikeValue &rhs);
+  LualikeValue operator/=(this LualikeValue &lhs, const LualikeValue &rhs);
+  LualikeValue operator%=(this LualikeValue &lhs, const LualikeValue &rhs);
+  LualikeValue ExponentiateAndAssign(this LualikeValue &lhs,
+                                     const LualikeValue &rhs);
+
+  // Performs adding as this: if both operands are int, sums up integers;
+  // otherwise if both are numeric interprets operands as floats and sums them
+  // up.
+  friend LualikeValue operator+(const LualikeValue &lhs,
+                                const LualikeValue &rhs);
+  // Performs substraction similarly as summation operator do.
+  friend LualikeValue operator-(const LualikeValue &lhs,
+                                const LualikeValue &rhs);
+  // Performs multiplication similarly as summation operator do.
+  friend LualikeValue operator*(const LualikeValue &lhs,
+                                const LualikeValue &rhs);
+  // Performs division by first converting both operands to float.
+  friend LualikeValue operator/(const LualikeValue &lhs,
+                                const LualikeValue &rhs);
+  // Performs modulo division similarly as summation operator do.
+  friend LualikeValue operator%(const LualikeValue &lhs,
+                                const LualikeValue &rhs);
+  // Exponantiates current value to RHS operator value by first converting them
+  // both to float. Because of that exponents can be non-integer.
+  friend LualikeValue Exponentiate(const LualikeValue &lhs,
+                                   const LualikeValue &rhs);
+
+  // Negates the number.
+  friend LualikeValue operator-(const LualikeValue &operand);
+
+  // Performs logical OR on operands.
+  friend LualikeValue operator||(const LualikeValue &lhs,
+                                 const LualikeValue &rhs);
+  // Performs logical AND on operands.
+  friend LualikeValue operator&&(const LualikeValue &lhs,
+                                 const LualikeValue &rhs);
+  // Performs logical NOT on operands.
+  friend LualikeValue operator!(const LualikeValue &operand);
+};
+
+}  // namespace lualike::value

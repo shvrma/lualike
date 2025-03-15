@@ -1,0 +1,72 @@
+module;
+
+#include <cstdint>
+#include <exception>
+#include <expected>
+#include <generator>
+#include <unordered_map>
+
+export module lualike.interpreter;
+
+export import lualike.lexer;
+
+namespace lexer = lualike::lexer;
+namespace token = lualike::token;
+namespace value = lualike::value;
+
+export namespace lualike::interpreter {
+
+enum class InterpreterErrKind : uint8_t {
+  kUnknownName,
+  kExpectedStatementBeginning,
+  kExpectedExpression,
+  kUnclosedParanthesis,
+  kRedeclarationOfLocalVariable,
+  kExpectedEquilitySignInVarDeclaration,
+
+  kUnexpectedEOF,
+
+  // Something was unhandled. Normally should not happen.
+  kInternalException,
+
+  kSyntaxError,
+};
+
+struct InterpreterErr : std::exception {
+  InterpreterErrKind error_kind;
+  std::variant<std::monostate, std::exception, lexer::LexerErr> error;
+
+  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept
+      : error_kind(error_kind) {}
+
+  explicit InterpreterErr(const std::exception& exception) noexcept
+      : error_kind(InterpreterErrKind::kInternalException), error(exception) {}
+
+  explicit InterpreterErr(const lexer::LexerErr& lexer_err) noexcept
+      : error_kind(InterpreterErrKind::kSyntaxError), error(lexer_err) {}
+
+  const char* what() const noexcept override {
+    return "Interpreter error occured!";
+  }
+};
+
+using InterpretationResult =
+    std::expected<std::optional<value::LualikeValue>, InterpreterErr>;
+
+std::unordered_map<std::string, value::LualikeValue> std_env{};
+
+template <typename InputT>
+  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
+           std::is_same_v<char, std::ranges::range_value_t<InputT>>
+InterpretationResult EvaluateExpression(
+    InputT&& input, std::unordered_map<std::string, value::LualikeValue>&
+                        global_names) noexcept;
+
+template <typename InputT>
+  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
+           std::is_same_v<char, std::ranges::range_value_t<InputT>>
+InterpretationResult Interpret(
+    InputT&& input, std::unordered_map<std::string, value::LualikeValue>&
+                        global_names) noexcept;
+
+}  // namespace lualike::interpreter
