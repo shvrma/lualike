@@ -36,10 +36,16 @@ export struct LexerErr : std::exception {
   explicit LexerErr(LexerErrKind error_kind) noexcept;
 };
 
+export using TokensRangeT = std::generator<const token::Token&>;
+
 export template <typename InputT>
-  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
-           std::is_same_v<char, std::ranges::range_value_t<InputT>>
-std::generator<const token::Token&> ReadTokens(InputT&& input);
+concept InputTRequirements =
+    std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
+    std::is_same_v<char, std::ranges::range_value_t<InputT>>;
+
+export template <typename InputT>
+  requires InputTRequirements<InputT>
+TokensRangeT ReadTokens(InputT&& input);
 
 template <typename InputT>
 class Lexer {
@@ -379,9 +385,8 @@ std::optional<token::Token> Lexer<InputT>::NextToken() {
 }
 
 template <typename InputT>
-  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
-           std::is_same_v<char, std::ranges::range_value_t<InputT>>
-std::generator<const token::Token&> ReadTokens(InputT&& input) {
+  requires InputTRequirements<InputT>
+TokensRangeT ReadTokens(InputT&& input) {
   Lexer<InputT> lexer(std::forward<InputT>(input));
 
   while (auto token = lexer.NextToken()) {

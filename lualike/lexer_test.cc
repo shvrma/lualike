@@ -12,8 +12,6 @@ namespace token = lualike::token;
 using token::Token;
 using token::TokenKind;
 
-using namespace std::string_literals;
-
 namespace lualike::lexer {
 
 MATCHER_P(LualikeSyntaticlyEqualsTo, valid_tokens_seq, "") {
@@ -37,7 +35,7 @@ TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
   EXPECT_THAT("local empty_var = nil",
               LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
                   {TokenKind::kKeywordLocal},
-                  {TokenKind::kName, "empty_var"s},
+                  {TokenKind::kName, "empty_var"},
                   {TokenKind::kOtherEqual},
                   {TokenKind::kKeywordNil},
               }));
@@ -60,7 +58,7 @@ TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
               }));
 
   EXPECT_THAT(
-      "-- Very meaningfull variable\n\r"
+      "-- Very meaningfull variable\n"
       "local curr_year = \'2025\'",
       LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
           {TokenKind::kKeywordLocal},

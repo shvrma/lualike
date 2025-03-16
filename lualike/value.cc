@@ -106,6 +106,10 @@ std::string LualikeValue::ToString() const {
       return std::string{value};
     }
 
+    else if constexpr (std::is_same<T, LualikeValue::FuncT>()) {
+      return "function obj";
+    }
+
     else {
       static_assert(false, "Not every type is covered.");
     }
@@ -232,14 +236,14 @@ LualikeValue operator-(const LualikeValue &operand) {
 
 LualikeValue operator||(const LualikeValue &lhs, const LualikeValue &rhs) {
   const auto lhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
-  const auto rhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
+  const auto rhs_as_bool = TryAsBool(rhs, LualikeValueOpErrKind::kLhsNotBool);
 
   return {lhs_as_bool || rhs_as_bool};
 }
 
 LualikeValue operator&&(const LualikeValue &lhs, const LualikeValue &rhs) {
   const auto lhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
-  const auto rhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
+  const auto rhs_as_bool = TryAsBool(rhs, LualikeValueOpErrKind::kLhsNotBool);
 
   return {lhs_as_bool && rhs_as_bool};
 }

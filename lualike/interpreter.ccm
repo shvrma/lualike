@@ -5,6 +5,7 @@ module;
 #include <expected>
 #include <generator>
 #include <unordered_map>
+#include <vector>
 
 export module lualike.interpreter;
 
@@ -22,7 +23,8 @@ enum class InterpreterErrKind : uint8_t {
   kExpectedExpression,
   kUnclosedParanthesis,
   kRedeclarationOfLocalVariable,
-  kExpectedEquilitySignInVarDeclaration,
+  kExpectedAssignmentOrFuncCall,
+  kExpectedEndKeywordAfterFuncBody,
 
   kUnexpectedEOF,
 
@@ -50,23 +52,43 @@ struct InterpreterErr : std::exception {
   }
 };
 
-using InterpretationResult =
-    std::expected<std::optional<value::LualikeValue>, InterpreterErr>;
+std::unordered_map<std::string, value::LualikeValue> MakeDefaultGlobalEnv();
 
-std::unordered_map<std::string, value::LualikeValue> std_env{};
-
-template <typename InputT>
-  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
-           std::is_same_v<char, std::ranges::range_value_t<InputT>>
-InterpretationResult EvaluateExpression(
-    InputT&& input, std::unordered_map<std::string, value::LualikeValue>&
-                        global_names) noexcept;
+using lexer::InputTRequirements;
 
 template <typename InputT>
-  requires std::ranges::view<InputT> && std::ranges::input_range<InputT> &&
-           std::is_same_v<char, std::ranges::range_value_t<InputT>>
-InterpretationResult Interpret(
-    InputT&& input, std::unordered_map<std::string, value::LualikeValue>&
-                        global_names) noexcept;
+  requires InputTRequirements<InputT>
+class Interpreter {
+  lexer::TokensRangeT tokens_r_;
+  std::ranges::const_iterator_t<lexer::TokensRangeT> iter_ =
+      std::ranges::cbegin(tokens_r_);
+  std::ranges::const_sentinel_t<lexer::TokensRangeT> sentinel_ =
+      std::ranges::cend(tokens_r_);
+  bool read_only = false;
+
+  std::unordered_map<std::string, value::LualikeValue> local_names_;
+  std::unordered_map<std::string, value::LualikeValue> global_names_;
+
+  value::LualikeValue ReadExpressionAtom();
+  // TODO(shvrma): replace magic constant.
+  value::LualikeValue ReadExpression(int min_precedence = 1);
+  // Expect curent token to be the name and several other to form a assigment
+  // statement.
+  void ReadName(bool is_local_decl);
+  std::vector<token::Token> ReadFunctionBody();
+  std::optional<value::LualikeValue> ReadBlock();
+
+ public:
+  explicit Interpreter(InputT&& input,
+                       std::unordered_map<std::string, value::LualikeValue>&&
+                           global_names = MakeDefaultGlobalEnv())
+      : tokens_r_(lexer::ReadTokens(std::move(input))),
+        global_names_(std::move(global_names)) {}
+
+  std::expected<value::LualikeValue, InterpreterErr>
+  EvaluateExpression() noexcept;
+  std::expected<std::optional<value::LualikeValue>, InterpreterErr>
+  Interpret() noexcept;
+};
 
 }  // namespace lualike::interpreter

@@ -2,8 +2,10 @@ module;
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <string>
 #include <variant>
+#include <vector>
 
 export module lualike.value;
 
@@ -28,10 +30,16 @@ struct LualikeValueOpErr : std::exception {
       : error_kind(error_kind) {}
 };
 
-// export template <typename TokenType>
-// struct LualikeFunction {
-//   std::vector<TokenType> tokens;
-// };
+struct LualikeValue;
+
+struct LualikeFunction {
+  std::vector<std::string> args;
+
+  explicit LualikeFunction(std::vector<std::string> &&func_args) noexcept
+      : args(std::move(func_args)) {};
+
+  virtual std::optional<LualikeValue> Call(std::vector<LualikeValue> args) = 0;
+};
 
 // Represents a single value during runtime. Note, though, that in *lualike*
 // values have types, and each type has a corresponding C++ type associated with
@@ -43,10 +51,9 @@ struct LualikeValue {
   using IntT = int64_t;
   using FloatT = double;
   using StringT = std::string;
-  // template <typename TokenType>
-  // using FuncT = LualikeFunction<TokenType>;
+  using FuncT = std::shared_ptr<LualikeFunction>;
 
-  std::variant<NilT, BoolT, IntT, FloatT, StringT> inner_value{NilT{}};
+  std::variant<NilT, BoolT, IntT, FloatT, StringT, FuncT> inner_value{NilT{}};
 
   friend bool operator==(const LualikeValue &, const LualikeValue &) = default;
   friend auto operator<=>(const LualikeValue &, const LualikeValue &) = default;

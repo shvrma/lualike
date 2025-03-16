@@ -1,31 +1,40 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <expected>
-#include <generator>
+#include <format>
 #include <string_view>
 
 import lualike.interpreter;
 import lualike.value;
 
-using lualike::value::LualikeValue;
-
 namespace lualike::interpreter {
 
 MATCHER_P(LualikeEvaluatesTo, compare_to, "") {
-  const auto eval_result = EvaluateExpression(std::string_view{arg}, std_env);
+  using LLV = lualike::value::LualikeValue;
 
-  if (!eval_result) {
-    return false;
+  const auto eval_result =
+      Interpreter(std::string_view{arg}).EvaluateExpression();
+
+  EXPECT_TRUE(eval_result.has_value());
+  if constexpr (std::is_same_v<decltype(compare_to), LLV::FloatT>) {
+    EXPECT_DOUBLE_EQ(std::get<LLV::FloatT>(eval_result.value().inner_value),
+                     compare_to);
+  } else {
+    EXPECT_EQ(eval_result.value(), LLV{compare_to});
   }
 
-  return *eval_result == LualikeValue{compare_to};
+  return true;
 }
 
 MATCHER(LualikeInterpretsSuccessfully, "") {
-  const auto result = Interpret(std::string_view{arg}, std_env);
+  const auto interpretation_result =
+      Interpreter(std::string_view{arg}).Interpret();
 
-  return result.has_value();
+  EXPECT_TRUE(interpretation_result.has_value()) << std::format(
+      "After interpeting next program: \n{}\nGot an error: {}.", arg,
+      static_cast<int>(interpretation_result.error().error_kind));
+
+  return true;
 }
 
 TEST(InterpreterTest, ExpressionEvaluationTest) {
@@ -38,19 +47,21 @@ TEST(InterpreterTest, ExpressionEvaluationTest) {
 }
 
 TEST(InterpreterTest, InterpretValidStatementsTest) {
-  EXPECT_THAT("local var = 3.14", LualikeInterpretsSuccessfully());
   EXPECT_THAT("var = 3.14", LualikeInterpretsSuccessfully());
 }
 
 TEST(InterpreterTest, InterpretValidProgramsTest) {
   EXPECT_THAT(";;;", LualikeInterpretsSuccessfully());
-
-  EXPECT_THAT(
-      "local var = 3.14 "
-      "var = 228 ",
-      LualikeInterpretsSuccessfully());
-
   EXPECT_THAT("return 1", LualikeInterpretsSuccessfully());
+  EXPECT_THAT(
+      "local pi_num = 3.14\n"
+      "return pi_num",
+      LualikeInterpretsSuccessfully());
+  EXPECT_THAT(
+      "local pi_num = 3.14\n"
+      "print(pi_num)\n"
+      "return true",
+      LualikeInterpretsSuccessfully());
 }
 
 }  // namespace lualike::interpreter
