@@ -2,12 +2,12 @@ module;
 
 #include <expected>
 #include <generator>
-#include <iostream>
 #include <memory>
 #include <optional>
+#include <print>
 #include <ranges>
 #include <string>
-#include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -17,77 +17,39 @@ module lualike.interpreter;
 
 namespace lualike::interpreter {
 
-struct LualikeFunctionRepr : value::LualikeFunction {
-  std::vector<token::Token> body;
+constexpr auto kBinOpsPrecedences = frozen::make_unordered_map<TokenKind, int>({
+    {TokenKind::kKeywordOr, 1},
 
-  explicit LualikeFunctionRepr(std::vector<std::string>&& func_args,
-                               std::vector<token::Token>&& func_body)
-      : LualikeFunction(std::move(func_args)), body(std::move(func_body)) {};
+    {TokenKind::kKeywordAnd, 2},
 
-  std::optional<value::LualikeValue> Call(
-      std::vector<value::LualikeValue> args) override {
-    return {};
-  };
-};
+    {TokenKind::kOtherLessThan, 3},
+    {TokenKind::kOtherGreaterThan, 3},
+    {TokenKind::kOtherLessThanEqual, 3},
+    {TokenKind::kOtherGreaterThanEqual, 3},
+    {TokenKind::kOtherTildeEqual, 3},
+    {TokenKind::kOtherDoubleEqual, 3},
 
-struct LualikePrintFunc : value::LualikeFunction {
-  explicit LualikePrintFunc() : LualikeFunction({"to_print"}) {};
+    {TokenKind::kOtherPlus, 9},
+    {TokenKind::kOtherMinus, 9},
 
-  std::optional<value::LualikeValue> Call(
-      std::vector<value::LualikeValue> args) override {
-    std::cout << args.at(0).ToString() << '\n';
+    {TokenKind::kOtherAsterisk, 10},
+    {TokenKind::kOtherSlash, 10},
+    {TokenKind::kOtherDoubleSlash, 10},
+    {TokenKind::kOtherPercent, 10},
 
-    return std::nullopt;
-  };
-};
+    {TokenKind::kOtherCaret, 11},
+});
 
-std::unordered_map<std::string, value::LualikeValue> MakeDefaultGlobalEnv() {
-  const value::LualikeValue::FuncT print_func =
-      std::make_shared<LualikePrintFunc>();
-
-  return {{"print", {print_func}}};
-}
-
-constexpr auto kBinOpsPrecedences =
-    frozen::make_unordered_map<token::TokenKind, int>({
-        {token::TokenKind::kKeywordOr, 1},
-
-        {token::TokenKind::kKeywordAnd, 2},
-
-        {token::TokenKind::kOtherLessThan, 3},
-        {token::TokenKind::kOtherGreaterThan, 3},
-        {token::TokenKind::kOtherLessThanEqual, 3},
-        {token::TokenKind::kOtherGreaterThanEqual, 3},
-        {token::TokenKind::kOtherTildeEqual, 3},
-        {token::TokenKind::kOtherDoubleEqual, 3},
-
-        {token::TokenKind::kOtherPlus, 9},
-        {token::TokenKind::kOtherMinus, 9},
-
-        {token::TokenKind::kOtherAsterisk, 10},
-        {token::TokenKind::kOtherSlash, 10},
-        {token::TokenKind::kOtherDoubleSlash, 10},
-        {token::TokenKind::kOtherPercent, 10},
-
-        {token::TokenKind::kOtherCaret, 11},
-    });
-
-template <typename InputT>
-  requires InputTRequirements<InputT>
-value::LualikeValue Interpreter<InputT>::ReadExpressionAtom() {
-  if (Interpreter::iter_ == Interpreter::sentinel_) {
+LualikeValue Interpreter::ReadExpressionAtom() {
+  if (iter_ == sentinel_) {
     throw InterpreterErr(InterpreterErrKind::kExpectedExpression);
   }
 
-  const auto token = *Interpreter::iter_;
-  Interpreter::iter_++;
+  const auto token = *iter_;
+  iter_++;
 
   switch (token.token_kind) {
-    case token::TokenKind::kName: {
-      if (Interpreter::read_only) {
-        return {};
-      }
-
+    case TokenKind::kName: {
       const auto& name = std::get<std::string>(token.token_data);
 
       if (const auto find_result = Interpreter::local_names_.find(name);
@@ -95,8 +57,8 @@ value::LualikeValue Interpreter<InputT>::ReadExpressionAtom() {
         return find_result->second;
       }
 
-      if (const auto find_result = Interpreter::global_names_.find(name);
-          find_result != Interpreter::global_names_.end()) {
+      if (const auto find_result = Interpreter::global_names_->find(name);
+          find_result != Interpreter::global_names_->end()) {
         return find_result->second;
       }
 
@@ -105,51 +67,30 @@ value::LualikeValue Interpreter<InputT>::ReadExpressionAtom() {
 
     break;
 
-    case token::TokenKind::kKeywordTrue:
+    case TokenKind::kKeywordTrue:
       return {true};
 
-    case token::TokenKind::kKeywordFalse:
+    case TokenKind::kKeywordFalse:
       return {false};
 
-    case token::TokenKind::kKeywordNil:
+    case TokenKind::kKeywordNil:
       return {};
 
-    case token::TokenKind::kLiteral:
-      if (Interpreter::read_only) {
-        return {};
-      }
+    case TokenKind::kLiteral:
+      return std::get<LualikeValue>(token.token_data);
 
-      return std::get<value::LualikeValue>(token.token_data);
-
-    case token::TokenKind::kOtherMinus: {
-      if (Interpreter::read_only) {
-        return {};
-      }
-
+    case TokenKind::kOtherMinus: {
       return -(Interpreter::ReadExpressionAtom());
     }
 
-    case token::TokenKind::kKeywordNot: {
-      if (Interpreter::read_only) {
-        return {};
-      }
-
+    case TokenKind::kKeywordNot: {
       return !(Interpreter::ReadExpressionAtom());
     }
 
-    case token::TokenKind::kOtherLeftParenthesis: {
-      const value::LualikeValue inner_value = Interpreter::ReadExpression(1);
+    case TokenKind::kOtherLeftParenthesis: {
+      const LualikeValue inner_value = Interpreter::ReadExpression();
 
-      if (Interpreter::iter_ == Interpreter::sentinel_) {
-        throw InterpreterErr(InterpreterErrKind::kExpectedExpression);
-      }
-
-      if (const auto& token = *Interpreter::iter_;
-          token.token_kind != token::TokenKind::kOtherRightParenthesis) {
-        throw InterpreterErr(InterpreterErrKind::kUnclosedParanthesis);
-      }
-
-      Interpreter::iter_++;
+      ExpectToken(TokenKind::kOtherRightParenthesis);
 
       return inner_value;
     }
@@ -161,14 +102,11 @@ value::LualikeValue Interpreter<InputT>::ReadExpressionAtom() {
   }
 }
 
-template <typename InputT>
-  requires InputTRequirements<InputT>
-value::LualikeValue Interpreter<InputT>::ReadExpression(
-    const int min_precedence) {
-  auto result = Interpreter::ReadExpressionAtom();
+LualikeValue Interpreter::ReadExpression(const int min_precedence) {
+  auto result = ReadExpressionAtom();
 
-  while (Interpreter::iter_ != Interpreter::sentinel_) {
-    const auto token_kind = (*Interpreter::iter_).token_kind;
+  while (iter_ != sentinel_) {
+    const auto token_kind = (*iter_).token_kind;
 
     const auto& find_result = kBinOpsPrecedences.find(token_kind);
     if (find_result == kBinOpsPrecedences.end()) {
@@ -180,39 +118,54 @@ value::LualikeValue Interpreter<InputT>::ReadExpression(
       break;
     }
 
-    Interpreter::iter_++;
+    iter_++;
     // Power operator is the only right-associative.
-    const auto rhs = Interpreter::ReadExpression(
-        (token_kind == token::TokenKind::kOtherCaret) ? precedence
-                                                      : precedence + 1);
+    const auto rhs = ReadExpression(
+        (token_kind == TokenKind::kOtherCaret) ? precedence : precedence + 1);
 
-    if (Interpreter::read_only) {
+    if (read_only) {
       continue;
     }
 
     switch (token_kind) {
-      case token::TokenKind::kOtherPlus:
+      case TokenKind::kOtherPlus:
         result += rhs;
+
         break;
 
-      case token::TokenKind::kOtherMinus:
+      case TokenKind::kOtherMinus:
         result -= rhs;
+
         break;
 
-      case token::TokenKind::kOtherAsterisk:
+      case TokenKind::kOtherAsterisk:
         result *= rhs;
+
         break;
 
-      case token::TokenKind::kOtherSlash:
+      case TokenKind::kOtherSlash:
         result /= rhs;
+
         break;
 
-      case token::TokenKind::kOtherPercent:
+      case TokenKind::kOtherPercent:
         result %= rhs;
+
         break;
 
-      case token::TokenKind::kOtherCaret:
+      case TokenKind::kOtherCaret:
         result.ExponentiateAndAssign(rhs);
+
+        break;
+
+      case TokenKind::kOtherDoubleEqual:
+        result = {result == rhs};
+
+        break;
+
+      case TokenKind::kOtherTildeEqual:
+        result = {result != rhs};
+
         break;
 
       default:
@@ -223,117 +176,120 @@ value::LualikeValue Interpreter<InputT>::ReadExpression(
   return result;
 }
 
-template <typename InputT>
-  requires InputTRequirements<InputT>
-std::vector<token::Token> Interpreter<InputT>::ReadFunctionBody() {
-  auto original_iter = std::move(Interpreter::iter_);
-  auto original_sent = Interpreter::sentinel_;
+void Interpreter::ReadName(bool is_local_decl) {
+  const auto& token = *iter_;
 
-  std::vector<token::Token> accumulated_tokens{};
-  auto wrap_around_r = [&]() -> lexer::TokensRangeT {
-    while (original_iter != original_sent) {
-      accumulated_tokens.push_back(*original_iter);
-      co_yield *original_iter;
-    }
-  }();
+  const auto variable_name = std::get<std::string>(token.token_data);
 
-  Interpreter::iter_ = std::ranges::cbegin(wrap_around_r);
-  Interpreter::sentinel_ = std::ranges::cend(wrap_around_r);
-  Interpreter::read_only = true;
-
-  Interpreter::ReadBlock();
-
-  Interpreter::iter_ = std::move(original_iter);
-  Interpreter::sentinel_ = original_sent;
-  Interpreter::read_only = false;
-
-  if (Interpreter::iter_ != Interpreter::sentinel_) {
-    throw InterpreterErr(InterpreterErrKind::kExpectedEndKeywordAfterFuncBody);
-  }
-  if (const auto& token = *Interpreter::iter_;
-      token.token_kind != token::TokenKind::kKeywordEnd) {
-    throw InterpreterErr(InterpreterErrKind::kExpectedEndKeywordAfterFuncBody);
-  }
-  Interpreter::iter_++;
-
-  return accumulated_tokens;
-}
-
-template <typename InputT>
-  requires InputTRequirements<InputT>
-void Interpreter<InputT>::ReadName(bool is_local_decl) {
-  const auto& token = *Interpreter::iter_;
-  const auto variable_name{std::get<std::string>(token.token_data)};
-
-  Interpreter::iter_++;
-  if (Interpreter::iter_ == Interpreter::sentinel_) {
-    throw InterpreterErr(InterpreterErrKind::kUnexpectedEOF);
+  iter_++;
+  if (iter_ == sentinel_) {
+    throw InterpreterErr(InterpreterErrKind::kExpectedAssignmentOrFuncCall);
   }
   switch (token.token_kind) {
-    case token::TokenKind::kOtherEqual: {
-      Interpreter::iter_++;
-      const auto variable_value = Interpreter::ReadExpression();
+    case TokenKind::kOtherEqual: {
+      iter_++;
+      const auto variable_value = ReadExpression();
 
       if (is_local_decl) {
-        const auto [_, was_successfull] = Interpreter::local_names_.try_emplace(
-            variable_name, variable_value);
+        const auto [_, was_successful] =
+            local_names_.try_emplace(variable_name, variable_value);
 
-        if (!was_successfull) {
+        if (!was_successful) {
           throw InterpreterErr(
               InterpreterErrKind::kRedeclarationOfLocalVariable);
         }
       }
 
       else {
-        Interpreter::global_names_.insert_or_assign(variable_name,
-                                                    variable_value);
+        global_names_->insert_or_assign(variable_name, variable_value);
       }
     }
 
     break;
 
-    case token::TokenKind::kOtherLeftParenthesis: {
-      // Pass
-    }
+    case TokenKind::kOtherLeftParenthesis:
+      // TODO(shvrma): func call.
 
-    break;
+      break;
 
     default:
       throw InterpreterErr(InterpreterErrKind::kExpectedAssignmentOrFuncCall);
   }
 }
 
-template <typename InputT>
-  requires InputTRequirements<InputT>
-std::optional<value::LualikeValue> Interpreter<InputT>::ReadBlock() {
-  while (Interpreter::iter_ != Interpreter::sentinel_) {
-    switch (const auto& token = *Interpreter::iter_; token.token_kind) {
-      case token::TokenKind::kKeywordReturn:
-        Interpreter::iter_++;
+std::vector<Token> Interpreter::CollectBlockTill(
+    std::initializer_list<TokenKind> end_tokens, bool should_discard) {
+  std::vector<Token> block_content{};
 
-        if (Interpreter::iter_ == Interpreter::sentinel_) {
+  while (iter_ != sentinel_) {
+    const auto& token = *iter_;
+
+    if (std::ranges::find(end_tokens, token.token_kind) != end_tokens.end()) {
+      break;
+    }
+
+    if (token.token_kind == TokenKind::kKeywordIf) {
+      block_content.append_range(CollectBlockTill({
+          TokenKind::kKeywordEnd,
+      }));
+    }
+
+    if (!should_discard) {
+      block_content.push_back(token);
+    }
+
+    iter_++;
+  }
+
+  return block_content;
+}
+
+std::optional<LualikeValue> Interpreter::ReadBlock() {
+  while (iter_ != sentinel_) {
+    const auto& token = *iter_;
+
+    switch (token.token_kind) {
+      case TokenKind::kKeywordReturn:
+        iter_++;
+
+        if (iter_ == sentinel_) {
           return std::nullopt;
         }
-        if (const auto token = *Interpreter::iter_;
-            token.token_kind == token::TokenKind::kOtherSemicolon) {
+
+        if (token.token_kind == TokenKind::kOtherSemicolon) {
           return std::nullopt;
         }
 
         return Interpreter::ReadExpression();
 
-      case token::TokenKind::kKeywordLocal:
-        Interpreter::iter_++;
-        Interpreter::ReadName(true);
+      case TokenKind::kKeywordLocal:
+        iter_++;
+
+        ReadName(true);
+
         break;
 
-      case token::TokenKind::kName:
-        Interpreter::ReadName(false);
+      case TokenKind::kName:
+        ReadName(false);
+
         break;
 
-      case token::TokenKind::kOtherSemicolon:
-        Interpreter::iter_++;
+      case TokenKind::kOtherSemicolon:
+        iter_++;
+
         break;
 
+      case TokenKind::kKeywordIf: {
+        iter_++;
+
+        if (auto early_return = ReadIfElseStatement()) {
+          return early_return;
+        }
+
+        break;
+      }
+
+      // Not a valid statement.
       default:
         return std::nullopt;
     }
@@ -342,12 +298,67 @@ std::optional<value::LualikeValue> Interpreter<InputT>::ReadBlock() {
   return std::nullopt;
 }
 
-template <typename InputT>
-  requires InputTRequirements<InputT>
-std::expected<value::LualikeValue, InterpreterErr>
-Interpreter<InputT>::EvaluateExpression() noexcept {
+std::optional<LualikeValue> Interpreter::ReadIfElseStatement() {
+  const auto condition = Interpreter::ReadExpression();
+  if (!std::holds_alternative<LualikeValue::BoolT>(condition.inner_value)) {
+    // TODO(shvrma): throw error.
+    return {};
+  }
+  const auto condition_value =
+      std::get<LualikeValue::BoolT>(condition.inner_value);
+
+  ExpectToken(TokenKind::kKeywordThen);
+
+  auto if_block_content =
+      CollectBlockTill({TokenKind::kKeywordElse, TokenKind::kKeywordEnd});
+
+  if (iter_ == sentinel_) {
+    // TODO(shvrma): throw error.
+    return {};
+  }
+
+  std::optional<std::vector<Token>> else_block_content{};
+  if (const auto& token = *iter_; token.token_kind == TokenKind::kKeywordElse) {
+    iter_++;
+
+    // Discard if condition holds, otherwise collect.
+    else_block_content = std::make_optional(
+        CollectBlockTill({TokenKind::kKeywordEnd}, condition_value));
+  }
+
+  ExpectToken(TokenKind::kKeywordEnd);
+
+  // https://devblogs.microsoft.com/oldnewthing/20211103-00/?p=105870
+  auto to_range =
+      [](std::vector<Token>& block_content) -> std::generator<const Token&> {
+    co_yield std::ranges::elements_of(block_content);
+  };
+
+  if (condition_value) {
+    auto tokens_r = to_range(if_block_content);
+
+    auto interpreter = Interpreter(tokens_r, global_names_);
+    return interpreter.ReadBlock();
+  }
+
+  if (else_block_content.has_value()) {
+    auto tokens_r = to_range(else_block_content.value());
+
+    auto interpreter = Interpreter(tokens_r, global_names_);
+    return interpreter.ReadBlock();
+  }
+
+  return std::nullopt;
+}
+
+template <std::ranges::view InputT>
+std::expected<std::optional<LualikeValue>, InterpreterErr> Interpret(
+    InputT input) noexcept {
   try {
-    return Interpreter::ReadExpression();
+    auto tokens_r = lexer::ReadTokens(input);
+    auto interpreter =
+        Interpreter(tokens_r, std::make_shared<Interpreter::NamesT>());
+    return interpreter.ReadBlock();
   }
 
   catch (const InterpreterErr& err) {
@@ -358,8 +369,8 @@ Interpreter<InputT>::EvaluateExpression() noexcept {
     return std::unexpected(InterpreterErr(err));
   }
 
-  catch (const std::exception& excepion) {
-    return std::unexpected(InterpreterErr(excepion));
+  catch (const std::exception& exception) {
+    return std::unexpected(InterpreterErr(exception));
   }
 
   catch (...) {
@@ -368,32 +379,7 @@ Interpreter<InputT>::EvaluateExpression() noexcept {
   }
 }
 
-template <typename InputT>
-  requires InputTRequirements<InputT>
-std::expected<std::optional<value::LualikeValue>, InterpreterErr>
-Interpreter<InputT>::Interpret() noexcept {
-  try {
-    return Interpreter::ReadBlock();
-  }
-
-  catch (const InterpreterErr& err) {
-    return std::unexpected(InterpreterErr(err));
-  }
-
-  catch (const lexer::LexerErr& err) {
-    return std::unexpected(InterpreterErr(err));
-  }
-
-  catch (const std::exception& excepion) {
-    return std::unexpected(InterpreterErr(excepion));
-  }
-
-  catch (...) {
-    return std::unexpected(
-        InterpreterErr(InterpreterErrKind::kInternalException));
-  }
-}
-
-template class Interpreter<std::string_view>;
+template std::expected<std::optional<LualikeValue>, InterpreterErr> Interpret(
+    std::string_view);
 
 }  // namespace lualike::interpreter

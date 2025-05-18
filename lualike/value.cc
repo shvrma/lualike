@@ -3,6 +3,7 @@ module;
 #include <cmath>
 #include <expected>
 #include <optional>
+#include <print>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -99,11 +100,11 @@ std::string LualikeValue::ToString() const {
 
     else if constexpr (std::is_same<T, LualikeValue::IntT>() ||
                        std::is_same<T, LualikeValue::FloatT>()) {
-      return std::to_string(value);
+      return "Number <" + std::to_string(value) + ">";
     }
 
     else if constexpr (std::is_same<T, LualikeValue::StringT>()) {
-      return std::string{value};
+      return "String <" + std::string{value} + ">";
     }
 
     else if constexpr (std::is_same<T, LualikeValue::FuncT>()) {

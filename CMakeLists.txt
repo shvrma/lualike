@@ -15,8 +15,7 @@ FetchContent_Declare(
   GIT_TAG 1.2.0)
 FetchContent_MakeAvailable(frozen)
 
-add_library(lualike lualike/value.cc lualike/token.cc lualike/lexer.cc
-                    lualike/interpreter.cc)
+add_library(lualike lualike/value.cc lualike/lexer.cc lualike/interpreter.cc)
 target_link_libraries(lualike frozen)
 target_sources(
   lualike

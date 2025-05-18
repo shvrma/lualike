@@ -9,6 +9,7 @@
 import lualike.lexer;
 
 namespace token = lualike::token;
+
 using token::Token;
 using token::TokenKind;
 
@@ -58,7 +59,7 @@ TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
               }));
 
   EXPECT_THAT(
-      "-- Very meaningfull variable\n"
+      "-- Very meaningful variable\n"
       "local curr_year = \'2025\'",
       LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
           {TokenKind::kKeywordLocal},

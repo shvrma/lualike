@@ -3,6 +3,7 @@ module;
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -73,7 +74,7 @@ struct LualikeValue {
   // up.
   friend LualikeValue operator+(const LualikeValue &lhs,
                                 const LualikeValue &rhs);
-  // Performs substraction similarly as summation operator do.
+  // Performs subtraction similarly as summation operator do.
   friend LualikeValue operator-(const LualikeValue &lhs,
                                 const LualikeValue &rhs);
   // Performs multiplication similarly as summation operator do.

@@ -4,29 +4,31 @@ module;
 #include <exception>
 #include <expected>
 #include <generator>
+#include <memory>
+#include <optional>
+#include <print>
 #include <unordered_map>
-#include <vector>
+#include <utility>
+#include <variant>
 
 export module lualike.interpreter;
 
 export import lualike.lexer;
 
-namespace lexer = lualike::lexer;
-namespace token = lualike::token;
-namespace value = lualike::value;
+using lualike::lexer::LexerErr;
+using lualike::token::Token;
+using lualike::token::TokenKind;
+using lualike::value::LualikeValue;
 
-export namespace lualike::interpreter {
+namespace lualike::interpreter {
 
-enum class InterpreterErrKind : uint8_t {
+export enum class InterpreterErrKind : uint8_t {
   kUnknownName,
-  kExpectedStatementBeginning,
+  kExpected,
   kExpectedExpression,
-  kUnclosedParanthesis,
+  kUnclosedParenthesis,
   kRedeclarationOfLocalVariable,
   kExpectedAssignmentOrFuncCall,
-  kExpectedEndKeywordAfterFuncBody,
-
-  kUnexpectedEOF,
 
   // Something was unhandled. Normally should not happen.
   kInternalException,
@@ -34,9 +36,9 @@ enum class InterpreterErrKind : uint8_t {
   kSyntaxError,
 };
 
-struct InterpreterErr : std::exception {
+export struct InterpreterErr : std::exception {
   InterpreterErrKind error_kind;
-  std::variant<std::monostate, std::exception, lexer::LexerErr> error;
+  std::variant<std::monostate, TokenKind, std::exception, LexerErr> error;
 
   explicit InterpreterErr(InterpreterErrKind error_kind) noexcept
       : error_kind(error_kind) {}
@@ -44,51 +46,69 @@ struct InterpreterErr : std::exception {
   explicit InterpreterErr(const std::exception& exception) noexcept
       : error_kind(InterpreterErrKind::kInternalException), error(exception) {}
 
-  explicit InterpreterErr(const lexer::LexerErr& lexer_err) noexcept
+  explicit InterpreterErr(const LexerErr& lexer_err) noexcept
       : error_kind(InterpreterErrKind::kSyntaxError), error(lexer_err) {}
 
+  explicit InterpreterErr(TokenKind expected) noexcept
+      : error_kind(InterpreterErrKind::kExpected), error(expected) {}
+
   const char* what() const noexcept override {
-    return "Interpreter error occured!";
+    return "Interpreter error occurred!";
   }
 };
 
-std::unordered_map<std::string, value::LualikeValue> MakeDefaultGlobalEnv();
+export class Interpreter {
+  using TokensRangeT = std::generator<const Token&>;
 
-using lexer::InputTRequirements;
-
-template <typename InputT>
-  requires InputTRequirements<InputT>
-class Interpreter {
-  lexer::TokensRangeT tokens_r_;
-  std::ranges::const_iterator_t<lexer::TokensRangeT> iter_ =
-      std::ranges::cbegin(tokens_r_);
-  std::ranges::const_sentinel_t<lexer::TokensRangeT> sentinel_ =
-      std::ranges::cend(tokens_r_);
+  std::ranges::const_iterator_t<TokensRangeT> iter_;
+  std::ranges::const_sentinel_t<TokensRangeT> sentinel_;
   bool read_only = false;
 
-  std::unordered_map<std::string, value::LualikeValue> local_names_;
-  std::unordered_map<std::string, value::LualikeValue> global_names_;
+  using NamesT = std::unordered_map<std::string, LualikeValue>;
 
-  value::LualikeValue ReadExpressionAtom();
+  NamesT local_names_;
+  std::shared_ptr<NamesT> global_names_;
+
+  LualikeValue ReadExpressionAtom();
   // TODO(shvrma): replace magic constant.
-  value::LualikeValue ReadExpression(int min_precedence = 1);
-  // Expect curent token to be the name and several other to form a assigment
+  LualikeValue ReadExpression(int min_precedence = 1);
+  // Pre: current token to be the name and several other to form a assignment
   // statement.
   void ReadName(bool is_local_decl);
-  std::vector<token::Token> ReadFunctionBody();
-  std::optional<value::LualikeValue> ReadBlock();
+  std::optional<LualikeValue> ReadBlock();
+  std::vector<Token> CollectBlockTill(
+      std::initializer_list<TokenKind> end_tokens, bool should_discard = false);
+  // Pre: if keyword has been read.
+  std::optional<LualikeValue> ReadIfElseStatement();
 
- public:
-  explicit Interpreter(InputT&& input,
-                       std::unordered_map<std::string, value::LualikeValue>&&
-                           global_names = MakeDefaultGlobalEnv())
-      : tokens_r_(lexer::ReadTokens(std::move(input))),
+  void ExpectToken(TokenKind expected_token_kind) {
+    if (iter_ == sentinel_) {
+      throw InterpreterErr(InterpreterErrKind::kExpected);
+    }
+
+    if (const auto& token = *iter_; token.token_kind != expected_token_kind) {
+      throw InterpreterErr(token.token_kind);
+    }
+
+    iter_++;
+  }
+
+  explicit Interpreter(TokensRangeT& tokens_r,
+                       std::shared_ptr<NamesT> global_names)
+      : iter_(std::ranges::cbegin(tokens_r)),
+        sentinel_(std::ranges::cend(tokens_r)),
         global_names_(std::move(global_names)) {}
 
-  std::expected<value::LualikeValue, InterpreterErr>
-  EvaluateExpression() noexcept;
-  std::expected<std::optional<value::LualikeValue>, InterpreterErr>
-  Interpret() noexcept;
+ public:
+  template <std::ranges::view InputT>
+  friend std::expected<std::optional<LualikeValue>, InterpreterErr> Interpret(
+      InputT input) noexcept;
 };
+
+// NOLINTBEGIN(readability-redundant-declaration)
+export template <std::ranges::view InputT>
+std::expected<std::optional<LualikeValue>, InterpreterErr> Interpret(
+    InputT input) noexcept;
+// NOLINTEND(readability-redundant-declaration)
 
 }  // namespace lualike::interpreter
