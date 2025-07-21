@@ -3,6 +3,10 @@ module;
 #include <cstdint>
 #include <generator>
 #include <ranges>
+#include <string_view>
+
+#include "frozen/string.h"
+#include "frozen/unordered_map.h"
 
 export module lualike.lexer;
 
@@ -13,52 +17,246 @@ using lualike::token::kOtherSingleCharTokensMap;
 using lualike::token::kOtherTwoCharTokensMap;
 using lualike::token::Token;
 using lualike::token::TokenKind;
-using lualike::value::LualikeValue;
 
-namespace lualike::lexer {
+export namespace lualike::lexer {
 
-export enum class LexerErrKind : uint8_t {
+enum class LexerErrKind : uint8_t {
   kTooLongToken,
-
   kInvalidNumber,
   kInvalidName,
   kInvalidString,
-
   kInvalidSymbol,
 };
 
-export struct LexerErr : std::exception {
+struct LexerErr : std::exception {
   LexerErrKind error_kind;
 
   explicit LexerErr(LexerErrKind error_kind) noexcept
       : error_kind(error_kind) {}
+
+  const char* what() const noexcept override {
+    switch (error_kind) {
+      case LexerErrKind::kTooLongToken:
+        return "token too long";
+      case LexerErrKind::kInvalidNumber:
+        return "invalid number";
+      case LexerErrKind::kInvalidName:
+        return "invalid name";
+      case LexerErrKind::kInvalidString:
+        return "invalid string";
+      case LexerErrKind::kInvalidSymbol:
+        return "invalid symbol";
+    }
+    return "unknown lexer error";
+  }
 };
 
-export template <std::ranges::view InputT>
-std::generator<const Token&> ReadTokens(InputT input);
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+std::generator<Token> ReadTokens(InputT input);
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 class Lexer {
   std::ranges::const_iterator_t<InputT> iter_;
   std::ranges::const_sentinel_t<InputT> sentinel_;
+  std::ranges::const_iterator_t<InputT>
+      input_begin_;  // Iter point to the beginning of the input
+  std::ranges::const_iterator_t<InputT>
+      token_start_iter_;  // Iter point to the beginning of the current token
 
-  std::string token_data_accumulator_;
-
-  // Pre: single alphabetic symbol or underscore in accumulator.
+  // Pre: single alphabetic symbol or underscore has been consumed.
   Token ReadAlphanumeric();
-  // Pre: accumulator is empty and delimiter is got
+  // Pre: delimiter is got
   Token ReadShortLiteralString(char delimiter);
-  // Pre: single digit is in accumulator.
+  // Pre: single digit has been consumed.
   Token ReadNumericConstant();
 
  public:
   explicit Lexer(InputT input)
       : iter_(std::ranges::cbegin(input)),
-        sentinel_(std::ranges::cend(input)) {}
-
-  const int kMaxOutputAccumLength = 16;
+        sentinel_(std::ranges::cend(input)),
+        input_begin_(std::ranges::cbegin(input)),
+        token_start_iter_(std::ranges::cbegin(input)) {}
 
   std::optional<Token> NextToken();
+
+  friend std::generator<Token> ReadTokens<>(InputT input);
 };
+
+}  // namespace lualike::lexer
+
+// module :private;
+
+inline bool IsSpace(const char symbol) noexcept {
+  return symbol == ' ' || symbol == '\f' || symbol == '\n' || symbol == '\r' ||
+         symbol == '\t' || symbol == '\v';
+}
+
+inline bool IsAlphabetic(const char symbol) noexcept {
+  return (symbol >= 'a' && symbol <= 'z') || (symbol >= 'A' && symbol <= 'Z');
+}
+
+inline bool IsNumeric(const char symbol) noexcept {
+  return (symbol >= '0' && symbol <= '9');
+}
+
+inline bool IsAlphanumeric(const char symbol) noexcept {
+  return IsAlphabetic(symbol) || IsNumeric(symbol);
+}
+
+namespace lualike::lexer {
+
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+Token Lexer<InputT>::ReadAlphanumeric() {
+  while (iter_ != sentinel_) {
+    char symbol = *iter_;
+
+    if (IsAlphanumeric(symbol) || symbol == '_') {
+      iter_++;
+    } else {
+      break;
+    }
+  }
+
+  std::string_view token_data(token_start_iter_, iter_);
+
+  if (const auto& find_result =
+          token::kKeywordsMap.find(frozen::string{token_data});
+      find_result != token::kKeywordsMap.cend()) {
+    return {.token_kind = find_result->second};
+  }
+
+  return {.token_kind = token::TokenKind::kName};
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+token::Token Lexer<InputT>::ReadShortLiteralString(char delimiter) {
+  while (iter_ != sentinel_) {
+    char symbol = *iter_;
+    iter_++;
+
+    if (symbol == delimiter) {
+      return {.token_kind = TokenKind::kStringLiteral};
+    }
+  }
+
+  throw LexerErr(LexerErrKind::kInvalidString);
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+Token Lexer<InputT>::ReadNumericConstant() {
+  bool has_met_fractional_part = false;
+
+  while (iter_ != sentinel_) {
+    char symbol = *iter_;
+
+    if (symbol == '.' || symbol == ',') {
+      if (has_met_fractional_part) {
+        throw LexerErr(LexerErrKind::kInvalidNumber);
+      }
+
+      has_met_fractional_part = true;
+    }
+
+    else if (!IsNumeric(symbol)) {
+      break;
+    }
+
+    iter_++;
+  }
+
+  if (has_met_fractional_part) {
+    return {.token_kind = TokenKind::kFloatLiteral};
+  }
+
+  return {.token_kind = TokenKind::kIntLiteral};
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+std::optional<Token> Lexer<InputT>::NextToken() {
+  while (iter_ != sentinel_) {
+    if (IsSpace(*iter_)) {
+      iter_++;
+      continue;
+    }
+
+    if (*iter_ == '-' && (iter_ + 1) != sentinel_ && *(iter_ + 1) == '-') {
+      iter_ += 2;
+      while (iter_ != sentinel_ && *iter_ != '\n') {
+        iter_++;
+      }
+
+      continue;
+    }
+
+    break;
+  }
+
+  if (iter_ == sentinel_) {
+    return std::nullopt;
+  }
+
+  token_start_iter_ = iter_;
+  char symbol = *iter_;
+
+  if (IsAlphabetic(symbol) || symbol == '_') {
+    iter_++;
+    return {ReadAlphanumeric()};
+  }
+
+  if (IsNumeric(symbol)) {
+    iter_++;
+    return {ReadNumericConstant()};
+  }
+
+  if (symbol == '\'' || symbol == '\"') {
+    iter_++;
+    return {ReadShortLiteralString(symbol)};
+  }
+
+  if ((iter_ + 1) != sentinel_) {
+    if (const auto& find_result = token::kOtherTwoCharTokensMap.find(
+            frozen::string{{symbol, *(iter_ + 1), '\0'}});
+        find_result != token::kOtherTwoCharTokensMap.cend()) {
+      iter_ += 2;
+      return {{.token_kind = find_result->second}};
+    }
+  }
+
+  const auto& find_result = token::kOtherSingleCharTokensMap.find(symbol);
+  if (find_result != token::kOtherSingleCharTokensMap.cend()) {
+    iter_++;
+    return {{.token_kind = find_result->second}};
+  }
+
+  throw LexerErr(LexerErrKind::kInvalidSymbol);
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
+std::generator<Token> ReadTokens(InputT input) {
+  Lexer<InputT> lexer(input);
+
+  while (auto token_opt = lexer.NextToken()) {
+    auto& token = token_opt.value();
+    token.span_start =
+        std::distance(lexer.input_begin_, lexer.token_start_iter_);
+    token.span_end = std::distance(lexer.input_begin_, lexer.iter_);
+
+    if (token.token_kind == TokenKind::kName ||
+        token.token_kind == TokenKind::kStringLiteral ||
+        token.token_kind == TokenKind::kIntLiteral ||
+        token.token_kind == TokenKind::kFloatLiteral) {
+      token.token_data = std::string_view(lexer.token_start_iter_, lexer.iter_);
+    }
+
+    co_yield token;
+  }
+}
 
 }  // namespace lualike::lexer

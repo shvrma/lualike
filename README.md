@@ -2,17 +2,15 @@
 
 An interpreter with a syntax resembling Lua's one.
 
-There is a lot still to do. Currently the functionality includes:
+There is a lot still to do.
 
-- Expression evaluation
-- Variables assignments
-- Conditionals
+Not a serious product as I haven't take any Compiler Theory class.
 
-Not a serious product as I haven't take any Compiler Theory class, everything is done by *intuition* on how things work.
+The main reason for this, besides the learning purpouse, is to provide much lighter alternative (for example without the corouutines support) with clean and modern C++ API.
 
 ## Usage
 
-`lualike::Interpret` function is the entry point that accepts a *std::ranges::view* of char's as an input. By default, template is instantiated for *std::string_view* type only.
+`lualike::Interpret` function is the entry point that accepts a *std::ranges::view* of char's as an input (that is also to be a *std::ranges::random_access_range*).
 
 Usage example:
 
@@ -29,3 +27,4 @@ if (eval_result.has_value()) {
 
 - <https://compilers.iecc.com/crenshaw/>
 - <https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing>
+- Modern Compiler Implementation in C by Andrew W. Appel (ISBN 0 521 58390 X)

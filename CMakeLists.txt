@@ -11,24 +11,23 @@ include(FetchContent)
 FetchContent_Declare(
   frozen
   GIT_REPOSITORY https://github.com/serge-sans-paille/frozen.git
-  GIT_TAG 1.2.0)
+  GIT_TAG 45ddf6534848ec00668e1408333f8515f6dccf8c)
 FetchContent_MakeAvailable(frozen)
 
 add_library(lualike)
 target_sources(
   lualike
-  PRIVATE lualike/value.cc lualike/lexer.cc lualike/interpreter.cc
-          lualike/lualike.cc
   PUBLIC FILE_SET
-         lualike_implementation_modules
+         lualike
          TYPE
          CXX_MODULES
          FILES
          lualike/value.ccm
+         lualike/ast.ccm
+         lualike/parser.ccm
          lualike/token.ccm
          lualike/lexer.ccm
          lualike/interpreter.ccm
-  PUBLIC FILE_SET lualike_interface_modules TYPE CXX_MODULES FILES
          lualike/lualike.ccm)
 target_link_libraries(lualike frozen)
 
@@ -44,9 +43,11 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(lualike_test lualike/lexer_test.cc lualike/interpreter_test.cc
-                            lualike/value_test.cc)
-target_link_libraries(lualike_test lualike GTest::gtest_main GTest::gmock)
+add_executable(
+  lualike_test lualike/tests/lexer_test.cc lualike/tests/interpreter_test.cc
+               lualike/tests/parser_test.cc lualike/tests/value_test.cc)
+target_link_libraries(lualike_test PRIVATE lualike GTest::gtest_main
+                                           GTest::gmock)
 
 include(GoogleTest)
 gtest_discover_tests(lualike_test)

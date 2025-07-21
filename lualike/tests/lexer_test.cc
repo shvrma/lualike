@@ -1,7 +1,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <generator>
 #include <ranges>
 #include <string_view>
 #include <vector>
@@ -19,7 +18,11 @@ MATCHER_P(LualikeSyntaticlyEqualsTo, valid_tokens_seq, "") {
   const auto actual_tokens_seq = lexer::ReadTokens(std::string_view{arg}) |
                                  std::ranges::to<std::vector<Token>>();
 
-  return std::ranges::equal(actual_tokens_seq, valid_tokens_seq);
+  return std::ranges::equal(actual_tokens_seq, valid_tokens_seq,
+                            [](const Token& lhs, const Token& rhs) {
+                              return lhs.token_kind == rhs.token_kind &&
+                                     lhs.token_data == rhs.token_data;
+                            });
 }
 
 TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
@@ -46,7 +49,7 @@ TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
                   {TokenKind::kKeywordLocal},
                   {TokenKind::kName, "fib_num_10"},
                   {TokenKind::kOtherEqual},
-                  {TokenKind::kLiteral, value::LualikeValue{34}}}));
+                  {TokenKind::kIntLiteral, "34"}}));
 
   EXPECT_THAT("local function empty_func() end",
               LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
@@ -65,19 +68,19 @@ TEST(LexerTest, ReadAndCompareWithValidSeqTest) {
           {TokenKind::kKeywordLocal},
           {TokenKind::kName, "curr_year"},
           {TokenKind::kOtherEqual},
-          {TokenKind::kLiteral, value::LualikeValue{"2025"}}}));
+          {TokenKind::kStringLiteral, "\'2025\'"}}));
 
   EXPECT_THAT("1", LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
-                       {TokenKind::kLiteral, value::LualikeValue{1}}}));
+                       {TokenKind::kIntLiteral, "1"}}));
 
   EXPECT_THAT("1 + 2 * -3",
               LualikeSyntaticlyEqualsTo(std::initializer_list<Token>{
-                  {TokenKind::kLiteral, value::LualikeValue{1}},
+                  {TokenKind::kIntLiteral, "1"},
                   {TokenKind::kOtherPlus},
-                  {TokenKind::kLiteral, value::LualikeValue{2}},
+                  {TokenKind::kIntLiteral, "2"},
                   {TokenKind::kOtherAsterisk},
                   {TokenKind::kOtherMinus},
-                  {TokenKind::kLiteral, value::LualikeValue{3}},
+                  {TokenKind::kIntLiteral, "3"},
               }));
 }
 

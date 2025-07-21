@@ -3,101 +3,103 @@ module;
 #include <cstdint>
 #include <exception>
 #include <expected>
-#include <generator>
+#include <format>
 #include <memory>
 #include <optional>
-#include <print>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 
 export module lualike.interpreter;
 
-export import lualike.lexer;
+import lualike.lexer;
+import lualike.parser;
 
+using lualike::ast::BinaryOperator;
+using lualike::ast::UnaryOperator;
 using lualike::lexer::LexerErr;
+using lualike::parser::ParserErr;
 using lualike::token::Token;
 using lualike::token::TokenKind;
 using lualike::value::LualikeValue;
 
-namespace lualike::interpreter {
+export namespace lualike::interpreter {
 
-export enum class InterpreterErrKind : uint8_t {
+enum class InterpreterErrKind : uint8_t {
   kUnknownName,
-  kExpected,
-  kExpectedExpression,
-  kUnclosedParenthesis,
   kRedeclarationOfLocalVariable,
-  kExpectedAssignmentOrFuncCall,
-
-  // Something was unhandled. Normally should not happen.
   kInternalException,
-
   kSyntaxError,
+  kParserError,
 };
 
-export struct InterpreterErr : std::exception {
+struct InterpreterErr : std::exception {
   InterpreterErrKind error_kind;
-  std::variant<std::monostate, TokenKind, std::exception, LexerErr> error;
+  std::variant<std::monostate, std::exception_ptr, LexerErr, ParserErr> error;
+  mutable std::string message_;  // store generated message
 
   explicit InterpreterErr(InterpreterErrKind error_kind) noexcept
       : error_kind(error_kind) {}
 
-  explicit InterpreterErr(const std::exception& exception) noexcept
-      : error_kind(InterpreterErrKind::kInternalException), error(exception) {}
+  explicit InterpreterErr(const std::exception& /*unused*/) noexcept
+      : error_kind(InterpreterErrKind::kInternalException),
+        error(std::current_exception()) {}
 
   explicit InterpreterErr(const LexerErr& lexer_err) noexcept
       : error_kind(InterpreterErrKind::kSyntaxError), error(lexer_err) {}
 
-  explicit InterpreterErr(TokenKind expected) noexcept
-      : error_kind(InterpreterErrKind::kExpected), error(expected) {}
+  explicit InterpreterErr(const ParserErr& parser_err) noexcept
+      : error_kind(InterpreterErrKind::kParserError), error(parser_err) {}
 
   const char* what() const noexcept override {
-    return "Interpreter error occurred!";
+    switch (error_kind) {
+      case InterpreterErrKind::kUnknownName:
+        return "Unknown name encountered";
+
+      case InterpreterErrKind::kRedeclarationOfLocalVariable:
+        return "Redeclaration of local variable";
+
+      case InterpreterErrKind::kInternalException:
+        try {
+          std::rethrow_exception(std::get<std::exception_ptr>(error));
+        } catch (const std::exception& e) {
+          message_ = std::format("Internal interpreter error: {}", e.what());
+          return message_.c_str();
+        }
+
+        return "Internal interpreter error";
+
+      case InterpreterErrKind::kSyntaxError:
+        return "Syntax error in input";
+
+      case InterpreterErrKind::kParserError:
+        message_ =
+            std::format("Parser error: {}", std::get<ParserErr>(error).what());
+        return message_.c_str();
+    }
   }
 };
 
-export class Interpreter {
-  using TokensRangeT = std::generator<const Token&>;
-
-  std::ranges::const_iterator_t<TokensRangeT> iter_;
-  std::ranges::const_sentinel_t<TokensRangeT> sentinel_;
-  bool read_only = false;
-
+class Interpreter {
   using NamesT = std::unordered_map<std::string, LualikeValue>;
 
   NamesT local_names_;
   std::shared_ptr<NamesT> global_names_;
 
-  LualikeValue ReadExpressionAtom();
-  // TODO(shvrma): replace magic constant.
-  LualikeValue ReadExpression(int min_precedence = 1);
-  // Pre: current token to be the name and several other to form a assignment
-  // statement.
-  void ReadName(bool is_local_decl);
-  std::optional<LualikeValue> ReadBlock();
-  std::vector<Token> CollectBlockTill(
-      std::initializer_list<TokenKind> end_tokens, bool should_discard = false);
-  // Pre: if keyword has been read.
-  std::optional<LualikeValue> ReadIfElseStatement();
+  static bool IsTruthy(const LualikeValue& value);
 
-  void ExpectToken(TokenKind expected_token_kind) {
-    if (iter_ == sentinel_) {
-      throw InterpreterErr(InterpreterErrKind::kExpected);
-    }
+  template <typename ExprT>
+  LualikeValue ExprVisitor(const ExprT& expr);
+  template <typename StmtT>
+  std::optional<LualikeValue> StmtVisitor(const StmtT& stmt);
 
-    if (const auto& token = *iter_; token.token_kind != expected_token_kind) {
-      throw InterpreterErr(token.token_kind);
-    }
+  LualikeValue VisitExpression(const ast::Expression& expression);
+  std::optional<LualikeValue> VisitStatement(const ast::Statement& statement);
+  std::optional<LualikeValue> VisitBlock(const ast::Block& block);
 
-    iter_++;
-  }
-
-  explicit Interpreter(TokensRangeT& tokens_r,
-                       std::shared_ptr<NamesT> global_names)
-      : iter_(std::ranges::cbegin(tokens_r)),
-        sentinel_(std::ranges::cend(tokens_r)),
-        global_names_(std::move(global_names)) {}
+  explicit Interpreter(std::shared_ptr<NamesT> global_names)
+      : global_names_(std::move(global_names)) {}
 
  public:
   template <std::ranges::view InputT>
@@ -105,10 +107,233 @@ export class Interpreter {
       InputT input) noexcept;
 };
 
-// NOLINTBEGIN(readability-redundant-declaration)
-export template <std::ranges::view InputT>
+template <std::ranges::view InputT>
 std::expected<std::optional<LualikeValue>, InterpreterErr> Interpret(
-    InputT input) noexcept;
-// NOLINTEND(readability-redundant-declaration)
+    InputT input) noexcept {
+  try {
+    auto parse_result = parser::Parse(input);
+    if (!parse_result) {
+      return std::unexpected(InterpreterErr(parse_result.error()));
+    }
+
+    auto interpreter = Interpreter(std::make_shared<Interpreter::NamesT>());
+    return interpreter.VisitBlock(parse_result.value());
+  }
+
+  catch (const InterpreterErr& err) {
+    return std::unexpected(err);
+  }
+
+  catch (const lexer::LexerErr& err) {
+    return std::unexpected(InterpreterErr(err));
+  }
+
+  catch (const std::exception& exception) {
+    return std::unexpected(InterpreterErr(exception));
+  }
+
+  catch (...) {
+    return std::unexpected(
+        InterpreterErr(InterpreterErrKind::kInternalException));
+  }
+}
+
+}  // namespace lualike::interpreter
+
+//
+// module :private;
+
+namespace lualike::interpreter {
+
+LualikeValue Interpreter::VisitExpression(const ast::Expression& expression) {
+  return std::visit([this](const auto& expr) { return ExprVisitor(expr); },
+                    expression.node);
+}
+
+std::optional<LualikeValue> Interpreter::VisitStatement(
+    const ast::Statement& statement) {
+  return std::visit([this](const auto& stmt) { return StmtVisitor(stmt); },
+                    statement.node);
+}
+
+std::optional<LualikeValue> Interpreter::VisitBlock(const ast::Block& block) {
+  NamesT original_locals = local_names_;
+  for (const auto& statement : block.statements) {
+    if (auto return_value = VisitStatement(statement)) {
+      local_names_ = original_locals;
+      return return_value;
+    }
+  }
+  local_names_ = original_locals;
+
+  return std::nullopt;
+}
+
+bool Interpreter::IsTruthy(const LualikeValue& value) {
+  if (std::holds_alternative<LualikeValue::NilT>(value.inner_value)) {
+    return false;
+  }
+
+  if (std::holds_alternative<LualikeValue::BoolT>(value.inner_value)) {
+    return std::get<LualikeValue::BoolT>(value.inner_value);
+  }
+
+  return true;
+}
+
+template <typename ExprT>
+LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
+  using T = std::decay_t<decltype(expr)>;
+
+  if constexpr (std::is_same_v<T, ast::LiteralExpression>) {
+    return expr.value;
+  }
+
+  else if constexpr (std::is_same_v<T, ast::VariableExpression>) {
+    if (const auto find_result = local_names_.find(expr.name);
+        find_result != local_names_.end()) {
+      return find_result->second;
+    }
+
+    if (const auto find_result = global_names_->find(expr.name);
+        find_result != global_names_->end()) {
+      return find_result->second;
+    }
+
+    throw InterpreterErr(InterpreterErrKind::kUnknownName);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
+    auto rhs = VisitExpression(*expr.rhs);
+
+    switch (expr.op) {
+      case UnaryOperator::kNegate:
+        return -rhs;
+      case UnaryOperator::kNot:
+        return !rhs;
+      default:
+        throw std::logic_error("Unimplemented unary operator");
+    }
+  }
+
+  else if constexpr (std::is_same_v<T, ast::BinaryExpression>) {
+    auto lhs = VisitExpression(*expr.lhs);
+
+    if (expr.op == BinaryOperator::kAnd) {
+      return IsTruthy(lhs) ? VisitExpression(*expr.rhs) : lhs;
+    }
+    if (expr.op == BinaryOperator::kOr) {
+      return IsTruthy(lhs) ? lhs : VisitExpression(*expr.rhs);
+    }
+
+    auto rhs = VisitExpression(*expr.rhs);
+
+    switch (expr.op) {
+      case BinaryOperator::kAdd:
+        return lhs + rhs;
+
+      case BinaryOperator::kSubtract:
+        return lhs - rhs;
+
+      case BinaryOperator::kMultiply:
+        return lhs * rhs;
+
+      case BinaryOperator::kDivide:
+        return lhs / rhs;
+
+      case BinaryOperator::kFloorDivide:
+        lhs.FloorDivideAndAssign(rhs);
+        return lhs;
+
+      case BinaryOperator::kModulo:
+        return lhs % rhs;
+
+      case BinaryOperator::kPower:
+        lhs.ExponentiateAndAssign(rhs);
+        return lhs;
+
+      case BinaryOperator::kEqual:
+        return {lhs == rhs};
+
+      case BinaryOperator::kNotEqual:
+        return {lhs != rhs};
+
+      case BinaryOperator::kLessThan:
+        return {lhs < rhs};
+
+      case BinaryOperator::kLessThanEqual:
+        return {lhs <= rhs};
+
+      case BinaryOperator::kGreaterThan:
+        return {lhs > rhs};
+
+      case BinaryOperator::kGreaterThanEqual:
+        return {lhs >= rhs};
+
+      default:
+        throw std::logic_error("Unimplemented binary operator");
+    }
+  }
+
+  else {
+    throw std::logic_error("Unimplemented expression type");
+  }
+}
+
+template <typename StmtT>
+std::optional<LualikeValue> Interpreter::StmtVisitor(const StmtT& stmt) {
+  using T = std::decay_t<decltype(stmt)>;
+
+  if constexpr (std::is_same_v<T, ast::VariableDeclaration>) {
+    LualikeValue value;  // nil by default
+    if (stmt.initializer) {
+      value = VisitExpression(stmt.initializer.value());
+    }
+    const auto [_iter, was_successful] =
+        local_names_.try_emplace(stmt.name, value);
+    if (!was_successful) {
+      throw InterpreterErr(InterpreterErrKind::kRedeclarationOfLocalVariable);
+    }
+  }
+
+  else if constexpr (std::is_same_v<T, ast::Assignment>) {
+    auto value = VisitExpression(stmt.value);
+
+    if (local_names_.contains(stmt.variable.name)) {
+      local_names_.at(stmt.variable.name) = value;
+    } else {
+      // Assuming assignment to an undeclared variable goes to globals.
+      // You might want to check if it exists in globals first or
+      // throw an error.
+      global_names_->insert_or_assign(stmt.variable.name, value);
+    }
+  }
+
+  else if constexpr (std::is_same_v<T, ast::IfStatement>) {
+    auto condition = VisitExpression(stmt.condition);
+
+    if (IsTruthy(condition)) {
+      return VisitBlock(*stmt.then_branch);
+    }
+
+    if (stmt.else_branch) {
+      return VisitBlock(*stmt.else_branch);
+    }
+  }
+
+  else if constexpr (std::is_same_v<T, ast::ReturnStatement>) {
+    if (stmt.expression.has_value()) {
+      return VisitExpression(stmt.expression.value());
+    }
+
+    return std::nullopt;
+  }
+
+  else if constexpr (std::is_same_v<T, ast::ExpressionStatement>) {
+    VisitExpression(stmt.expression);
+  }
+
+  return std::nullopt;
+}
 
 }  // namespace lualike::interpreter

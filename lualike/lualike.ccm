@@ -1,21 +1,11 @@
 module;
 
-#include <expected>
-#include <generator>
-#include <print>
-
 export module lualike;
 
-export import lualike.interpreter;
-
-using lualike::interpreter::InterpreterErr;
-using lualike::lexer::LexerErr;
-using lualike::token::Token;
-using lualike::token::TokenKind;
-using lualike::value::LualikeValue;
+import lualike.interpreter;
 
 namespace lualike {
 
-export using lualike::interpreter::Interpret;
+using interpreter::Interpret;
 
-}  // namespace lualike
+}

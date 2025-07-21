@@ -1,9 +1,11 @@
 module;
 
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <variant>
 #include <vector>
@@ -13,7 +15,8 @@ export module lualike.value;
 export namespace lualike::value {
 
 enum class LualikeValueOpErrKind : uint8_t {
-  kInvalidOperandType,
+  kNotNumericOperand,
+  kNotBoolOperand,
   kNormallyImpossibleErr,
   kLhsNotNumeric,
   kLhsNotBool,
@@ -45,7 +48,7 @@ struct LualikeFunction {
 // Represents a single value during runtime. Note, though, that in *lualike*
 // values have types, and each type has a corresponding C++ type associated with
 // it. Underlying C++ types are aliased as *SomethingT* within this struct (e.g.
-// *Lualike::NilT* is alias to lualike nil type).
+// *Lualike::NilT* is alias to *lualike* nil type).
 struct LualikeValue {
   using NilT = std::monostate;
   using BoolT = bool;
@@ -68,6 +71,8 @@ struct LualikeValue {
   LualikeValue operator%=(this LualikeValue &lhs, const LualikeValue &rhs);
   LualikeValue ExponentiateAndAssign(this LualikeValue &lhs,
                                      const LualikeValue &rhs);
+  LualikeValue FloorDivideAndAssign(this LualikeValue &lhs,
+                                    const LualikeValue &rhs);
 
   // Performs adding as this: if both operands are int, sums up integers;
   // otherwise if both are numeric interprets operands as floats and sums them
@@ -90,6 +95,9 @@ struct LualikeValue {
   // both to float. Because of that exponents can be non-integer.
   friend LualikeValue Exponentiate(const LualikeValue &lhs,
                                    const LualikeValue &rhs);
+  // Performs floor division by first converting both operands to float.
+  friend LualikeValue FloorDivide(const LualikeValue &lhs,
+                                  const LualikeValue &rhs);
 
   // Negates the number.
   friend LualikeValue operator-(const LualikeValue &operand);
@@ -103,5 +111,273 @@ struct LualikeValue {
   // Performs logical NOT on operands.
   friend LualikeValue operator!(const LualikeValue &operand);
 };
+
+void PrintTo(const LualikeValue &value, std::ostream *os);
+
+}  // namespace lualike::value
+
+// module :private;
+
+namespace lualike::value {
+
+static std::optional<LualikeValue::FloatT> CastToFloat(const auto &value) {
+  using T = std::decay_t<decltype(value)>;
+
+  if constexpr (std::is_same<T, LualikeValue>()) {
+    return std::visit([](auto &&value) { return CastToFloat(value); },
+                      value.inner_value);
+  }
+
+  else if constexpr (std::is_same<T, LualikeValue::IntT>()) {
+    return static_cast<LualikeValue::FloatT>(value);
+  }
+
+  else if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
+    return value;
+  }
+
+  else {
+    return std::nullopt;
+  }
+
+  // TODO(shvrma): string conv.
+}
+
+static LualikeValue::BoolT TryAsBool(const LualikeValue &value,
+                                     LualikeValueOpErrKind error_kind) {
+  try {
+    return std::get<LualikeValue::BoolT>(value.inner_value);
+  } catch (std::bad_variant_access &err) {
+    throw LualikeValueOpErr(error_kind);
+  }
+};
+
+static inline LualikeValue PerformArithmeticBinOp(LualikeValue &lhs,
+                                                  const LualikeValue &rhs,
+                                                  const auto &operator_lambda) {
+  const auto visitor = [operator_lambda,
+                        &rhs](auto &&lhs_value) -> LualikeValue {
+    using T = std::decay_t<decltype(lhs_value)>;
+
+    if constexpr (std::is_same<T, LualikeValue::IntT>()) {
+      if (std::holds_alternative<LualikeValue::IntT>(rhs.inner_value)) {
+        return {operator_lambda(lhs_value,
+                                std::get<LualikeValue::IntT>(rhs.inner_value))};
+      }
+
+      const auto lhs_as_float = CastToFloat(lhs_value);
+      const auto rhs_as_float = CastToFloat(rhs);
+      if (!rhs_as_float) {
+        throw LualikeValueOpErr(LualikeValueOpErrKind::kRhsNotNumeric);
+      }
+
+      return {operator_lambda(*lhs_as_float, *rhs_as_float)};
+    }
+
+    if constexpr (std::is_same<T, LualikeValue::FloatT>()) {
+      const auto rhs_as_float = CastToFloat(rhs);
+      if (!rhs_as_float) {
+        throw LualikeValueOpErr(LualikeValueOpErrKind::kRhsNotNumeric);
+      }
+
+      return {operator_lambda(lhs_value, *rhs_as_float)};
+    }
+
+    else {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsNotNumeric);
+    }
+  };
+
+  return lhs = std::visit(visitor, lhs.inner_value);
+}
+
+std::string LualikeValue::ToString() const {
+  const auto visitor = [](auto &&value) -> std::string {
+    using T = std::decay_t<decltype(value)>;
+
+    if constexpr (std::is_same<T, LualikeValue::NilT>()) {
+      return "Nil";
+    }
+
+    else if constexpr (std::is_same<T, LualikeValue::BoolT>()) {
+      if (value) {
+        return "True";
+      }
+
+      return "False";
+    }
+
+    else if constexpr (std::is_same<T, LualikeValue::IntT>() ||
+                       std::is_same<T, LualikeValue::FloatT>()) {
+      return "Number <" + std::to_string(value) + ">";
+    }
+
+    else if constexpr (std::is_same<T, LualikeValue::StringT>()) {
+      return "String <" + std::string{value} + ">";
+    }
+
+    else if constexpr (std::is_same<T, LualikeValue::FuncT>()) {
+      return "Function";
+    }
+
+    else {
+      throw std::logic_error(
+          "Unimplemented LualikeValue type in ToString visitor");
+    }
+  };
+
+  return std::visit(visitor, LualikeValue::inner_value);
+}
+
+LualikeValue LualikeValue::operator+=(this LualikeValue &lhs,
+                                      const LualikeValue &rhs) {
+  return lhs = PerformArithmeticBinOp(
+             lhs, rhs,
+             [](const auto lhs, const auto rhs) { return lhs + rhs; });
+}
+
+LualikeValue operator+(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result += rhs;
+}
+
+LualikeValue LualikeValue::operator-=(this LualikeValue &lhs,
+                                      const LualikeValue &rhs) {
+  return lhs = PerformArithmeticBinOp(
+             lhs, rhs,
+             [](const auto lhs, const auto rhs) { return lhs - rhs; });
+}
+
+LualikeValue operator-(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result -= rhs;
+}
+
+LualikeValue LualikeValue::operator*=(this LualikeValue &lhs,
+                                      const LualikeValue &rhs) {
+  return lhs = PerformArithmeticBinOp(
+             lhs, rhs,
+             [](const auto lhs, const auto rhs) { return lhs * rhs; });
+}
+
+LualikeValue operator*(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result *= rhs;
+}
+
+LualikeValue LualikeValue::operator/=(this LualikeValue &lhs,
+                                      const LualikeValue &rhs) {
+  const auto lhs_as_float = CastToFloat(lhs);
+  if (!lhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsNotNumeric);
+  }
+
+  const auto rhs_as_float = CastToFloat(rhs);
+  if (!rhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kRhsNotNumeric);
+  }
+
+  return lhs = {*lhs_as_float / *rhs_as_float};
+}
+
+LualikeValue operator/(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result /= rhs;
+}
+
+LualikeValue LualikeValue::operator%=(this LualikeValue &lhs,
+                                      const LualikeValue &rhs) {
+  return lhs = PerformArithmeticBinOp(lhs, rhs, [](auto &lhs, const auto rhs) {
+           return static_cast<LualikeValue::IntT>(
+               std::floor(std::fmod(lhs, rhs)));
+         });
+}
+
+LualikeValue operator%(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result %= rhs;
+}
+
+LualikeValue LualikeValue::ExponentiateAndAssign(this LualikeValue &lhs,
+                                                 const LualikeValue &rhs) {
+  const auto lhs_as_float = CastToFloat(lhs);
+  if (!lhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsNotNumeric);
+  }
+
+  const auto rhs_as_float = CastToFloat(rhs);
+  if (!rhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kRhsNotNumeric);
+  }
+
+  return lhs = {std::pow(*lhs_as_float, *rhs_as_float)};
+}
+
+LualikeValue Exponentiate(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result.ExponentiateAndAssign(rhs);
+}
+
+LualikeValue LualikeValue::FloorDivideAndAssign(this LualikeValue &lhs,
+                                                const LualikeValue &rhs) {
+  const auto lhs_as_float = CastToFloat(lhs);
+  if (!lhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kLhsNotNumeric);
+  }
+
+  const auto rhs_as_float = CastToFloat(rhs);
+  if (!rhs_as_float) {
+    throw LualikeValueOpErr(LualikeValueOpErrKind::kRhsNotNumeric);
+  }
+
+  return lhs = {std::floor(*lhs_as_float / *rhs_as_float)};
+}
+
+LualikeValue FloorDivide(const LualikeValue &lhs, const LualikeValue &rhs) {
+  LualikeValue result = lhs;
+  return result.FloorDivideAndAssign(rhs);
+}
+
+LualikeValue operator-(const LualikeValue &operand) {
+  const auto visitor = [](auto &&value) -> LualikeValue {
+    using T = std::decay_t<decltype(value)>;
+
+    if constexpr (std::is_same<T, LualikeValue::IntT>() ||
+                  std::is_same<T, LualikeValue::FloatT>()) {
+      return {-value};
+    }
+
+    else {
+      throw LualikeValueOpErr(LualikeValueOpErrKind::kNotNumericOperand);
+    }
+  };
+
+  return std::visit(visitor, operand.inner_value);
+}
+
+LualikeValue operator||(const LualikeValue &lhs, const LualikeValue &rhs) {
+  const auto lhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
+  const auto rhs_as_bool = TryAsBool(rhs, LualikeValueOpErrKind::kRhsNotBool);
+
+  return {lhs_as_bool || rhs_as_bool};
+}
+
+LualikeValue operator&&(const LualikeValue &lhs, const LualikeValue &rhs) {
+  const auto lhs_as_bool = TryAsBool(lhs, LualikeValueOpErrKind::kLhsNotBool);
+  const auto rhs_as_bool = TryAsBool(rhs, LualikeValueOpErrKind::kRhsNotBool);
+
+  return {lhs_as_bool && rhs_as_bool};
+}
+
+LualikeValue operator!(const LualikeValue &operand) {
+  const auto operand_as_bool =
+      TryAsBool(operand, LualikeValueOpErrKind::kNotBoolOperand);
+
+  return {!operand_as_bool};
+}
+
+void PrintTo(const LualikeValue &value, std::ostream *out) {
+  *out << value.ToString();
+}
 
 }  // namespace lualike::value
