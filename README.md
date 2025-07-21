@@ -1,12 +1,20 @@
 # lualike
 
-An interpreter with a syntax resembling Lua's one.
+An interpreter with a syntax resembling Lua's.
 
 There is a lot still to do.
 
-Not a serious product as I haven't take any Compiler Theory class.
+Not a serious product, as I haven't taken any Compiler Theory class.
 
-The main reason for this, besides the learning purpouse, is to provide much lighter alternative (for example without the corouutines support) with clean and modern C++ API.
+The main reason for this, besides the learning purpose, is to provide a much lighter alternative (for example, without the coroutines support) with a clean and modern C++ API.
+
+## Prerequisites
+
+- A C++23 compiler with module support (Clang 16+, MSVC 19+, GCC 14+)  
+- CMake 3.28+ with Ninja (or another generator with modules enabled)  
+- Git
+
+Note that the latest versions of GCC do not compile the project currently due to the frozen dependency.
 
 ## Usage
 
@@ -15,12 +23,24 @@ The main reason for this, besides the learning purpouse, is to provide much ligh
 Usage example:
 
 ```c++
-const auto eval_result = lualike::Interpret(std::string_view{"return 1 + 2 * 3"});
+#include <string_view>
+#include <iostream>
 
-if (eval_result.has_value()) {
-    std::println("Program evaluated to a value: {}.", eval_result->value().ToString());
-    // Should print: Program evaluated to a value: 7.
+import lualike.interpreter;
+
+int main() {
+  using namespace std::literals;
+  const auto result = lualike::Interpret("return 1 + 2 * 3"sv);
+
+  if (!result) {
+    std::cerr << "Error: " << result.error().what() << "\n";
+    return 1;
+  }
+  if (auto val = result->value(); val.has_value()) {
+    std::cout << "Result: " << val->ToString() << "\n"; // prints "7"
+  }
 }
+
 ```
 
 ## Literature used
