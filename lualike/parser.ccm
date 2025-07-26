@@ -70,7 +70,8 @@ struct ParserErr : std::exception {
 template <std::ranges::view InputT>
 class Parser {
  private:
-  using TokensR = std::generator<Token>;
+  // using TokensR = std::generator<Token>;
+  using TokensR = std::vector<Token>;
 
   TokensR tokens_;
   std::ranges::iterator_t<TokensR> iter_;
@@ -117,7 +118,7 @@ std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
 
 namespace lualike::parser {
 
-static const std::unordered_map<TokenKind, int> kBinOpsPrecedences = {
+const std::unordered_map<TokenKind, int> kBinOpsPrecedences = {
     {TokenKind::kKeywordOr, 1},          {TokenKind::kKeywordAnd, 2},
     {TokenKind::kOtherLessThan, 3},      {TokenKind::kOtherGreaterThan, 3},
     {TokenKind::kOtherLessThanEqual, 3}, {TokenKind::kOtherGreaterThanEqual, 3},
@@ -128,32 +129,24 @@ static const std::unordered_map<TokenKind, int> kBinOpsPrecedences = {
     {TokenKind::kOtherCaret, 11},
 };
 
-static const std::unordered_map<TokenKind, ast::BinaryOperator> kTokenToBinOp =
-    {
-        {TokenKind::kKeywordOr, ast::BinaryOperator::kOr},
-        {TokenKind::kKeywordAnd, ast::BinaryOperator::kAnd},
-        {TokenKind::kOtherLessThan, ast::BinaryOperator::kLessThan},
-        {TokenKind::kOtherGreaterThan, ast::BinaryOperator::kGreaterThan},
-        {TokenKind::kOtherLessThanEqual, ast::BinaryOperator::kLessThanEqual},
-        {TokenKind::kOtherGreaterThanEqual,
-         ast::BinaryOperator::kGreaterThanEqual},
-        {TokenKind::kOtherTildeEqual, ast::BinaryOperator::kNotEqual},
-        {TokenKind::kOtherDoubleEqual, ast::BinaryOperator::kEqual},
-        {TokenKind::kOtherPlus, ast::BinaryOperator::kAdd},
-        {TokenKind::kOtherMinus, ast::BinaryOperator::kSubtract},
-        {TokenKind::kOtherAsterisk, ast::BinaryOperator::kMultiply},
-        {TokenKind::kOtherSlash, ast::BinaryOperator::kDivide},
-        {TokenKind::kOtherDoubleSlash, ast::BinaryOperator::kFloorDivide},
-        {TokenKind::kOtherPercent, ast::BinaryOperator::kModulo},
-        {TokenKind::kOtherCaret, ast::BinaryOperator::kPower},
+const std::unordered_map<TokenKind, ast::BinaryOperator> kTokenToBinOp = {
+    {TokenKind::kKeywordOr, ast::BinaryOperator::kOr},
+    {TokenKind::kKeywordAnd, ast::BinaryOperator::kAnd},
+    {TokenKind::kOtherLessThan, ast::BinaryOperator::kLessThan},
+    {TokenKind::kOtherGreaterThan, ast::BinaryOperator::kGreaterThan},
+    {TokenKind::kOtherLessThanEqual, ast::BinaryOperator::kLessThanEqual},
+    {TokenKind::kOtherGreaterThanEqual, ast::BinaryOperator::kGreaterThanEqual},
+    {TokenKind::kOtherTildeEqual, ast::BinaryOperator::kNotEqual},
+    {TokenKind::kOtherDoubleEqual, ast::BinaryOperator::kEqual},
+    {TokenKind::kOtherPlus, ast::BinaryOperator::kAdd},
+    {TokenKind::kOtherMinus, ast::BinaryOperator::kSubtract},
+    {TokenKind::kOtherAsterisk, ast::BinaryOperator::kMultiply},
+    {TokenKind::kOtherSlash, ast::BinaryOperator::kDivide},
+    {TokenKind::kOtherDoubleSlash, ast::BinaryOperator::kFloorDivide},
+    {TokenKind::kOtherPercent, ast::BinaryOperator::kModulo},
+    {TokenKind::kOtherCaret, ast::BinaryOperator::kPower},
 };
 
-static int GetPrec(TokenKind kind) {
-  if (kBinOpsPrecedences.contains(kind)) {
-    return kBinOpsPrecedences.at(kind);
-  }
-  return -1;
-}
 
 LualikeValue TokenToValue(const Token& token) {
   switch (token.token_kind) {

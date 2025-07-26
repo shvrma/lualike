@@ -4,6 +4,7 @@ module;
 #include <generator>
 #include <ranges>
 #include <string_view>
+#include <vector>
 
 export module lualike.lexer;
 
@@ -49,9 +50,12 @@ struct LexerErr : std::exception {
   }
 };
 
+// template <std::ranges::view InputT>
+//   requires std::ranges::random_access_range<InputT>
+// std::generator<Token> ReadTokens(InputT input);
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
-std::generator<Token> ReadTokens(InputT input);
+std::vector<Token> ReadTokens(InputT input);
 
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
@@ -79,7 +83,8 @@ class Lexer {
 
   std::optional<Token> NextToken();
 
-  friend std::generator<Token> ReadTokens<>(InputT input);
+  // friend std::generator<Token> ReadTokens<>(InputT input);
+  friend std::vector<Token> ReadTokens<>(InputT input);
 };
 
 }  // namespace lualike::lexer
@@ -234,10 +239,39 @@ std::optional<Token> Lexer<InputT>::NextToken() {
   throw LexerErr(LexerErrKind::kInvalidSymbol);
 }
 
+// template <std::ranges::view InputT>
+//   requires std::ranges::random_access_range<InputT>
+// std::generator<Token> ReadTokens(InputT input) {
+//   Lexer<InputT> lexer(input);
+
+//   while (auto token_opt = lexer.NextToken()) {
+//     auto& token = token_opt.value();
+//     token.span_start =
+//         std::distance(lexer.input_begin_, lexer.token_start_iter_);
+//     token.span_end = std::distance(lexer.input_begin_, lexer.iter_);
+
+//     if (token.token_kind == TokenKind::kName ||
+//         token.token_kind == TokenKind::kStringLiteral ||
+//         token.token_kind == TokenKind::kIntLiteral ||
+//         token.token_kind == TokenKind::kFloatLiteral) {
+//       token.token_data = std::string_view(lexer.token_start_iter_,
+//       lexer.iter_);
+//     }
+
+//     co_yield token;
+//   }
+// }
+
+// Drop-in replacement for the above commented-out function as G++ coroutines
+// works strange accross modules, and, btw, libc++ doesnt support
+// *std::generator* either.
+
+// Eagerly read all tokens from the input and return them as a vector.
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
-std::generator<Token> ReadTokens(InputT input) {
+std::vector<Token> ReadTokens(InputT input) {
   Lexer<InputT> lexer(input);
+  std::vector<Token> tokens;
 
   while (auto token_opt = lexer.NextToken()) {
     auto& token = token_opt.value();
@@ -252,8 +286,10 @@ std::generator<Token> ReadTokens(InputT input) {
       token.token_data = std::string_view(lexer.token_start_iter_, lexer.iter_);
     }
 
-    co_yield token;
+    tokens.push_back(token);
   }
+
+  return tokens;
 }
 
 }  // namespace lualike::lexer
