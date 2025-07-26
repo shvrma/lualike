@@ -3,9 +3,7 @@ module;
 #include <cstdint>
 #include <optional>
 #include <string_view>
-
-#include "frozen/string.h"
-#include "frozen/unordered_map.h"
+#include <unordered_map>
 
 export module lualike.token;
 
@@ -77,56 +75,53 @@ struct Token {
   bool operator==(const Token &rhs) const = default;
 };
 
-constexpr auto kKeywordsMap =
-    frozen::make_unordered_map<frozen::string, TokenKind>({
-        {"and", TokenKind::kKeywordAnd},
-        {"break", TokenKind::kKeywordBreak},
-        {"do", TokenKind::kKeywordDo},
-        {"else", TokenKind::kKeywordElse},
-        {"elseif", TokenKind::kKeywordElseif},
-        {"end", TokenKind::kKeywordEnd},
-        {"false", TokenKind::kKeywordFalse},
-        {"for", TokenKind::kKeywordFor},
-        {"function", TokenKind::kKeywordFunction},
-        {"goto", TokenKind::kKeywordGoto},
-        {"if", TokenKind::kKeywordIf},
-        {"in", TokenKind::kKeywordIn},
-        {"local", TokenKind::kKeywordLocal},
-        {"nil", TokenKind::kKeywordNil},
-        {"not", TokenKind::kKeywordNot},
-        {"or", TokenKind::kKeywordOr},
-        {"repeat", TokenKind::kKeywordRepeat},
-        {"return", TokenKind::kKeywordReturn},
-        {"then", TokenKind::kKeywordThen},
-        {"true", TokenKind::kKeywordTrue},
-        {"until", TokenKind::kKeywordUntil},
-        {"while", TokenKind::kKeywordWhile},
-    });
+const std::unordered_map<std::string_view, TokenKind> kKeywordsMap = {
+    {"and", TokenKind::kKeywordAnd},
+    {"break", TokenKind::kKeywordBreak},
+    {"do", TokenKind::kKeywordDo},
+    {"else", TokenKind::kKeywordElse},
+    {"elseif", TokenKind::kKeywordElseif},
+    {"end", TokenKind::kKeywordEnd},
+    {"false", TokenKind::kKeywordFalse},
+    {"for", TokenKind::kKeywordFor},
+    {"function", TokenKind::kKeywordFunction},
+    {"goto", TokenKind::kKeywordGoto},
+    {"if", TokenKind::kKeywordIf},
+    {"in", TokenKind::kKeywordIn},
+    {"local", TokenKind::kKeywordLocal},
+    {"nil", TokenKind::kKeywordNil},
+    {"not", TokenKind::kKeywordNot},
+    {"or", TokenKind::kKeywordOr},
+    {"repeat", TokenKind::kKeywordRepeat},
+    {"return", TokenKind::kKeywordReturn},
+    {"then", TokenKind::kKeywordThen},
+    {"true", TokenKind::kKeywordTrue},
+    {"until", TokenKind::kKeywordUntil},
+    {"while", TokenKind::kKeywordWhile},
+};
 
-constexpr auto kOtherSingleCharTokensMap =
-    frozen::make_unordered_map<char, TokenKind>({
-        {'+', TokenKind::kOtherPlus},
-        {'-', TokenKind::kOtherMinus},
-        {'*', TokenKind::kOtherAsterisk},
-        {'/', TokenKind::kOtherSlash},
-        {'%', TokenKind::kOtherPercent},
-        {'^', TokenKind::kOtherCaret},
-        {'<', TokenKind::kOtherLessThan},
-        {'>', TokenKind::kOtherGreaterThan},
-        {'=', TokenKind::kOtherEqual},
-        {'(', TokenKind::kOtherLeftParenthesis},
-        {')', TokenKind::kOtherRightParenthesis},
-        {';', TokenKind::kOtherSemicolon},
-        {',', TokenKind::kOtherComma},
-    });
+const std::unordered_map<char, TokenKind> kOtherSingleCharTokensMap = {
+    {'+', TokenKind::kOtherPlus},
+    {'-', TokenKind::kOtherMinus},
+    {'*', TokenKind::kOtherAsterisk},
+    {'/', TokenKind::kOtherSlash},
+    {'%', TokenKind::kOtherPercent},
+    {'^', TokenKind::kOtherCaret},
+    {'<', TokenKind::kOtherLessThan},
+    {'>', TokenKind::kOtherGreaterThan},
+    {'=', TokenKind::kOtherEqual},
+    {'(', TokenKind::kOtherLeftParenthesis},
+    {')', TokenKind::kOtherRightParenthesis},
+    {';', TokenKind::kOtherSemicolon},
+    {',', TokenKind::kOtherComma},
+};
 
-constexpr auto kOtherTwoCharTokensMap =
-    frozen::make_unordered_map<frozen::string, TokenKind>({
-        {"//", TokenKind::kOtherDoubleSlash},
-        {"==", TokenKind::kOtherDoubleEqual},
-        {"~=", TokenKind::kOtherTildeEqual},
-        {"<=", TokenKind::kOtherLessThanEqual},
-        {">=", TokenKind::kOtherGreaterThanEqual},
-    });
+const std::unordered_map<std::string_view, TokenKind> kOtherTwoCharTokensMap = {
+    {"//", TokenKind::kOtherDoubleSlash},
+    {"==", TokenKind::kOtherDoubleEqual},
+    {"~=", TokenKind::kOtherTildeEqual},
+    {"<=", TokenKind::kOtherLessThanEqual},
+    {">=", TokenKind::kOtherGreaterThanEqual},
+};
 
 }  // namespace lualike::token

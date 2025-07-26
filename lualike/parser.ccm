@@ -6,9 +6,8 @@ module;
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
-
-#include "frozen/unordered_map.h"
 
 export module lualike.parser;
 
@@ -118,27 +117,19 @@ std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
 
 namespace lualike::parser {
 
-static const auto kBinOpsPrecedences =
-    frozen::make_unordered_map<TokenKind, int>({
-        {TokenKind::kKeywordOr, 1},
-        {TokenKind::kKeywordAnd, 2},
-        {TokenKind::kOtherLessThan, 3},
-        {TokenKind::kOtherGreaterThan, 3},
-        {TokenKind::kOtherLessThanEqual, 3},
-        {TokenKind::kOtherGreaterThanEqual, 3},
-        {TokenKind::kOtherTildeEqual, 3},
-        {TokenKind::kOtherDoubleEqual, 3},
-        {TokenKind::kOtherPlus, 9},
-        {TokenKind::kOtherMinus, 9},
-        {TokenKind::kOtherAsterisk, 10},
-        {TokenKind::kOtherSlash, 10},
-        {TokenKind::kOtherDoubleSlash, 10},
-        {TokenKind::kOtherPercent, 10},
-        {TokenKind::kOtherCaret, 11},
-    });
+static const std::unordered_map<TokenKind, int> kBinOpsPrecedences = {
+    {TokenKind::kKeywordOr, 1},          {TokenKind::kKeywordAnd, 2},
+    {TokenKind::kOtherLessThan, 3},      {TokenKind::kOtherGreaterThan, 3},
+    {TokenKind::kOtherLessThanEqual, 3}, {TokenKind::kOtherGreaterThanEqual, 3},
+    {TokenKind::kOtherTildeEqual, 3},    {TokenKind::kOtherDoubleEqual, 3},
+    {TokenKind::kOtherPlus, 9},          {TokenKind::kOtherMinus, 9},
+    {TokenKind::kOtherAsterisk, 10},     {TokenKind::kOtherSlash, 10},
+    {TokenKind::kOtherDoubleSlash, 10},  {TokenKind::kOtherPercent, 10},
+    {TokenKind::kOtherCaret, 11},
+};
 
-static const auto kTokenToBinOp =
-    frozen::make_unordered_map<TokenKind, BinaryOperator>({
+static const std::unordered_map<TokenKind, ast::BinaryOperator> kTokenToBinOp =
+    {
         {TokenKind::kKeywordOr, ast::BinaryOperator::kOr},
         {TokenKind::kKeywordAnd, ast::BinaryOperator::kAnd},
         {TokenKind::kOtherLessThan, ast::BinaryOperator::kLessThan},
@@ -155,7 +146,7 @@ static const auto kTokenToBinOp =
         {TokenKind::kOtherDoubleSlash, ast::BinaryOperator::kFloorDivide},
         {TokenKind::kOtherPercent, ast::BinaryOperator::kModulo},
         {TokenKind::kOtherCaret, ast::BinaryOperator::kPower},
-    });
+};
 
 static int GetPrec(TokenKind kind) {
   if (kBinOpsPrecedences.contains(kind)) {

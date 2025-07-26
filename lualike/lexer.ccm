@@ -5,9 +5,6 @@ module;
 #include <ranges>
 #include <string_view>
 
-#include "frozen/string.h"
-#include "frozen/unordered_map.h"
-
 export module lualike.lexer;
 
 export import lualike.token;
@@ -23,6 +20,7 @@ export namespace lualike::lexer {
 enum class LexerErrKind : uint8_t {
   kTooLongToken,
   kInvalidNumber,
+
   kInvalidName,
   kInvalidString,
   kInvalidSymbol,
@@ -122,8 +120,7 @@ Token Lexer<InputT>::ReadAlphanumeric() {
 
   std::string_view token_data(token_start_iter_, iter_);
 
-  if (const auto& find_result =
-          token::kKeywordsMap.find(frozen::string{token_data});
+  if (const auto& find_result = token::kKeywordsMap.find(token_data);
       find_result != token::kKeywordsMap.cend()) {
     return {.token_kind = find_result->second};
   }
@@ -220,8 +217,8 @@ std::optional<Token> Lexer<InputT>::NextToken() {
   }
 
   if ((iter_ + 1) != sentinel_) {
-    if (const auto& find_result = token::kOtherTwoCharTokensMap.find(
-            frozen::string{{symbol, *(iter_ + 1), '\0'}});
+    if (const auto& find_result =
+            token::kOtherTwoCharTokensMap.find({iter_, iter_ + 2});
         find_result != token::kOtherTwoCharTokensMap.cend()) {
       iter_ += 2;
       return {{.token_kind = find_result->second}};
