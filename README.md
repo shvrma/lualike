@@ -10,11 +10,8 @@ The main reason for this, besides the learning purpose, is to provide a much lig
 
 ## Prerequisites
 
-- A C++23 compiler with module support (Clang 16+, MSVC 19+, GCC 14+)  
-- CMake 3.28+ with Ninja (or another generator with modules enabled)  
-- Git
-
-Note that the latest versions of GCC do not compile the project currently due to the frozen dependency.
+- A C++23 compiler with module support (Clang 16+, MSVC 19+, GCC 14+)
+- CMake 3.28+ with Ninja (or another generator with modules enabled)
 
 ## Usage
 
