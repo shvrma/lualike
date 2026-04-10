@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LUALIKE_INTERPRETER_H_
+#define LUALIKE_INTERPRETER_H_
 
 #include <cstdint>
 #include <exception>
@@ -20,59 +21,22 @@
 
 namespace lualike::interpreter {
 
-enum class InterpreterErrKind : uint8_t {
-  kUnknownName,
-  kRedeclarationOfLocalVariable,
-  kInternalException,
-  kSyntaxError,
-  kParserError,
-};
+struct InterpreterErr : std::runtime_error {
+  std::exception_ptr internal_exception;
 
-struct InterpreterErr : std::exception {
-  InterpreterErrKind error_kind;
-  std::variant<std::monostate, std::exception_ptr, lexer::LexerErr,
-               parser::ParserErr>
-      error;
-  mutable std::string message_;
+  explicit InterpreterErr(const char* msg) noexcept : std::runtime_error(msg) {}
 
-  explicit InterpreterErr(InterpreterErrKind error_kind) noexcept
-      : error_kind(error_kind) {}
-
-  explicit InterpreterErr(const std::exception&) noexcept
-      : error_kind(InterpreterErrKind::kInternalException),
-        error(std::current_exception()) {}
+  explicit InterpreterErr() noexcept
+      : std::runtime_error("Internal interpreter error"),
+        internal_exception(std::current_exception()) {}
 
   explicit InterpreterErr(const lexer::LexerErr& lexer_err) noexcept
-      : error_kind(InterpreterErrKind::kSyntaxError), error(lexer_err) {}
+      : std::runtime_error("Syntax error in input"),
+        internal_exception(std::make_exception_ptr(lexer_err)) {}
 
   explicit InterpreterErr(const parser::ParserErr& parser_err) noexcept
-      : error_kind(InterpreterErrKind::kParserError), error(parser_err) {}
-
-  const char* what() const noexcept override {
-    switch (error_kind) {
-      case InterpreterErrKind::kUnknownName:
-        return "Unknown name encountered";
-      case InterpreterErrKind::kRedeclarationOfLocalVariable:
-        return "Redeclaration of local variable";
-      case InterpreterErrKind::kInternalException:
-        try {
-          std::rethrow_exception(std::get<std::exception_ptr>(error));
-        } catch (const std::exception& e) {
-          message_ = std::format("Internal interpreter error: {}", e.what());
-          return message_.c_str();
-        }
-
-        return "Internal interpreter error";
-      case InterpreterErrKind::kSyntaxError:
-        return "Syntax error in input";
-      case InterpreterErrKind::kParserError:
-        message_ = std::format("Parser error: {}",
-                               std::get<parser::ParserErr>(error).what());
-        return message_.c_str();
-    }
-
-    return "Unknown interpreter error";
-  }
+      : std::runtime_error("Parser error in input"),
+        internal_exception(std::make_exception_ptr(parser_err)) {}
 };
 
 class Interpreter {
@@ -120,10 +84,9 @@ std::expected<std::optional<value::LualikeValue>, InterpreterErr> Interpret(
   } catch (const lexer::LexerErr& err) {
     return std::unexpected(InterpreterErr(err));
   } catch (const std::exception& exception) {
-    return std::unexpected(InterpreterErr(exception));
+    return std::unexpected(InterpreterErr());
   } catch (...) {
-    return std::unexpected(
-        InterpreterErr(InterpreterErrKind::kInternalException));
+    return std::unexpected(InterpreterErr());
   }
 }
 
@@ -182,7 +145,8 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
       return find_result->second;
     }
 
-    throw InterpreterErr(InterpreterErrKind::kUnknownName);
+    throw InterpreterErr(
+        "Unknown variable");  // TODO: Include variable name in error message.
   } else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
     auto rhs = VisitExpression(*expr.rhs);
 
@@ -258,7 +222,9 @@ std::optional<value::LualikeValue> Interpreter::StmtVisitor(const StmtT& stmt) {
     const auto [_iter, was_successful] =
         local_names_.try_emplace(stmt.name, value);
     if (!was_successful) {
-      throw InterpreterErr(InterpreterErrKind::kRedeclarationOfLocalVariable);
+      throw InterpreterErr(
+          "Redeclaration of local variable");  // TODO: Include variable name in
+                                               // error message.
     }
   } else if constexpr (std::is_same_v<T, ast::Assignment>) {
     auto value = VisitExpression(stmt.value);
@@ -292,3 +258,5 @@ std::optional<value::LualikeValue> Interpreter::StmtVisitor(const StmtT& stmt) {
 }
 
 }  // namespace lualike::interpreter
+
+#endif  // LUALIKE_INTERPRETER_H_

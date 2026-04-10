@@ -1,224 +1,310 @@
 #include "lualike/ast.h"
 
 #include <cstddef>
-#include <map>
 #include <string>
 #include <string_view>
 
-namespace {
-
-template <typename T>
-bool SharedPtrEqual(const std::shared_ptr<T>& lhs,
-                    const std::shared_ptr<T>& rhs) {
-  if (!lhs || !rhs) {
-    return lhs == rhs;
-  }
-
-  return *lhs == *rhs;
-}
-
-}  // namespace
-
 namespace lualike::ast {
 
-bool UnaryExpression::operator==(const UnaryExpression& other) const {
-  return op == other.op && SharedPtrEqual(rhs, other.rhs);
-}
-
-bool BinaryExpression::operator==(const BinaryExpression& other) const {
-  return op == other.op && SharedPtrEqual(lhs, other.lhs) &&
-         SharedPtrEqual(rhs, other.rhs);
-}
-
-bool FunctionCallExpression::operator==(
-    const FunctionCallExpression& other) const {
-  return SharedPtrEqual(callee, other.callee) && arguments == other.arguments;
-}
-
-bool IfStatement::operator==(const IfStatement& other) const {
-  return condition == other.condition &&
-         SharedPtrEqual(then_branch, other.then_branch) &&
-         SharedPtrEqual(else_branch, other.else_branch);
-}
-
-bool FunctionDeclaration::operator==(const FunctionDeclaration& other) const {
-  return name == other.name && params == other.params &&
-         SharedPtrEqual(body, other.body);
-}
-
 namespace {
 
-void PrintIndent(std::ostream* out, int indent) {
-  *out << std::string(static_cast<size_t>(indent * 2), ' ');
+void AppendIndent(std::string* out, int indent) {
+  out->append(static_cast<size_t>(indent * 2), ' ');
 }
 
-std::ostream& operator<<(std::ostream& out, UnaryOperator oper) {
-  static const std::map<UnaryOperator, std::string_view> kUnaryOperatorMap = {
-      {UnaryOperator::kNegate, "-"},
-      {UnaryOperator::kNot, "not"},
-  };
-
-  if (const auto iter = kUnaryOperatorMap.find(oper);
-      iter != kUnaryOperatorMap.end()) {
-    return out << iter->second;
+std::string_view UnaryOperatorToString(UnaryOperator oper) {
+  switch (oper) {
+    case UnaryOperator::kNegate:
+      return "-";
+    case UnaryOperator::kNot:
+      return "not";
   }
 
-  return out << "<unknown_unary_op>";
+  return "<unknown_unary_op>";
 }
 
-std::ostream& operator<<(std::ostream& out, BinaryOperator oper) {
-  static const std::map<BinaryOperator, std::string_view> kBinaryOperatorMap = {
-      {BinaryOperator::kOr, "or"},
-      {BinaryOperator::kAnd, "and"},
-      {BinaryOperator::kLessThan, "<"},
-      {BinaryOperator::kGreaterThan, ">"},
-      {BinaryOperator::kLessThanEqual, "<="},
-      {BinaryOperator::kGreaterThanEqual, ">="},
-      {BinaryOperator::kNotEqual, "~="},
-      {BinaryOperator::kEqual, "=="},
-      {BinaryOperator::kAdd, "+"},
-      {BinaryOperator::kSubtract, "-"},
-      {BinaryOperator::kMultiply, "*"},
-      {BinaryOperator::kDivide, "/"},
-      {BinaryOperator::kFloorDivide, "//"},
-      {BinaryOperator::kModulo, "%"},
-      {BinaryOperator::kPower, "^"},
-  };
-
-  if (const auto iter = kBinaryOperatorMap.find(oper);
-      iter != kBinaryOperatorMap.end()) {
-    return out << iter->second;
+std::string_view BinaryOperatorToString(BinaryOperator oper) {
+  switch (oper) {
+    case BinaryOperator::kOr:
+      return "or";
+    case BinaryOperator::kAnd:
+      return "and";
+    case BinaryOperator::kLessThan:
+      return "<";
+    case BinaryOperator::kGreaterThan:
+      return ">";
+    case BinaryOperator::kLessThanEqual:
+      return "<=";
+    case BinaryOperator::kGreaterThanEqual:
+      return ">=";
+    case BinaryOperator::kNotEqual:
+      return "~=";
+    case BinaryOperator::kEqual:
+      return "==";
+    case BinaryOperator::kAdd:
+      return "+";
+    case BinaryOperator::kSubtract:
+      return "-";
+    case BinaryOperator::kMultiply:
+      return "*";
+    case BinaryOperator::kDivide:
+      return "/";
+    case BinaryOperator::kFloorDivide:
+      return "//";
+    case BinaryOperator::kModulo:
+      return "%";
+    case BinaryOperator::kPower:
+      return "^";
   }
 
-  return out << "<unknown_binary_op>";
+  return "<unknown_binary_op>";
+}
+
+void AppendToString(const Expression& expr, std::string* out, int indent);
+void AppendToString(const Statement& stmt, std::string* out, int indent);
+void AppendToString(const Block& block, std::string* out, int indent);
+void AppendToString(const LiteralExpression& expr, std::string* out,
+                    int indent);
+void AppendToString(const VariableExpression& expr, std::string* out,
+                    int indent);
+void AppendToString(const UnaryExpression& expr, std::string* out, int indent);
+void AppendToString(const BinaryExpression& expr, std::string* out, int indent);
+void AppendToString(const FunctionCallExpression& expr, std::string* out,
+                    int indent);
+void AppendToString(const ExpressionStatement& stmt, std::string* out,
+                    int indent);
+void AppendToString(const ReturnStatement& stmt, std::string* out, int indent);
+void AppendToString(const VariableDeclaration& stmt, std::string* out,
+                    int indent);
+void AppendToString(const Assignment& stmt, std::string* out, int indent);
+void AppendToString(const IfStatement& stmt, std::string* out, int indent);
+void AppendToString(const FunctionDeclaration& stmt, std::string* out,
+                    int indent);
+
+template <typename NodeT>
+std::string ToIndentedString(const NodeT& node, int indent) {
+  std::string out;
+  AppendToString(node, &out, indent);
+  return out;
+}
+
+template <typename NodeT>
+void StreamNode(const NodeT& node, std::ostream* out, int indent) {
+  *out << ToIndentedString(node, indent);
+}
+
+void AppendToString(const LiteralExpression& expr, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("LiteralExpression: ");
+  out->append(expr.value.ToString());
+  out->push_back('\n');
+}
+
+void AppendToString(const VariableExpression& expr, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("VariableExpression: ");
+  out->append(expr.name);
+  out->push_back('\n');
+}
+
+void AppendToString(const UnaryExpression& expr, std::string* out, int indent) {
+  AppendIndent(out, indent);
+  out->append("UnaryExpression: ");
+  out->append(UnaryOperatorToString(expr.op));
+  out->push_back('\n');
+  AppendToString(*expr.rhs, out, indent + 1);
+}
+
+void AppendToString(const BinaryExpression& expr, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("BinaryExpression: ");
+  out->append(BinaryOperatorToString(expr.op));
+  out->push_back('\n');
+  AppendToString(*expr.lhs, out, indent + 1);
+  AppendToString(*expr.rhs, out, indent + 1);
+}
+
+void AppendToString(const FunctionCallExpression& expr, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("FunctionCallExpression\n");
+  AppendIndent(out, indent + 1);
+  out->append("Callee:\n");
+  AppendToString(*expr.callee, out, indent + 2);
+  AppendIndent(out, indent + 1);
+  out->append("Arguments:\n");
+  for (const auto& arg : expr.arguments) {
+    AppendToString(arg, out, indent + 2);
+  }
+}
+
+void AppendToString(const Expression& expr, std::string* out, int indent) {
+  std::visit(
+      [out, indent](const auto& node) { AppendToString(node, out, indent); },
+      expr.node);
+}
+
+void AppendToString(const ExpressionStatement& stmt, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("ExpressionStatement\n");
+  AppendToString(stmt.expression, out, indent + 1);
+}
+
+void AppendToString(const ReturnStatement& stmt, std::string* out, int indent) {
+  AppendIndent(out, indent);
+  out->append("ReturnStatement\n");
+  if (stmt.expression) {
+    AppendToString(*stmt.expression, out, indent + 1);
+  }
+}
+
+void AppendToString(const VariableDeclaration& stmt, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("VariableDeclaration: ");
+  out->append(stmt.name);
+  out->push_back('\n');
+  if (stmt.initializer) {
+    AppendToString(*stmt.initializer, out, indent + 1);
+  }
+}
+
+void AppendToString(const Assignment& stmt, std::string* out, int indent) {
+  AppendIndent(out, indent);
+  out->append("Assignment\n");
+  AppendToString(stmt.variable, out, indent + 1);
+  AppendToString(stmt.value, out, indent + 1);
+}
+
+void AppendToString(const IfStatement& stmt, std::string* out, int indent) {
+  AppendIndent(out, indent);
+  out->append("IfStatement\n");
+  AppendIndent(out, indent + 1);
+  out->append("Condition:\n");
+  AppendToString(stmt.condition, out, indent + 2);
+  AppendIndent(out, indent + 1);
+  out->append("Then:\n");
+  AppendToString(*stmt.then_branch, out, indent + 2);
+  if (stmt.else_branch) {
+    AppendIndent(out, indent + 1);
+    out->append("Else:\n");
+    AppendToString(*stmt.else_branch, out, indent + 2);
+  }
+}
+
+void AppendToString(const FunctionDeclaration& stmt, std::string* out,
+                    int indent) {
+  AppendIndent(out, indent);
+  out->append("FunctionDeclaration: ");
+  out->append(stmt.name);
+  out->push_back('(');
+  for (size_t i = 0; i < stmt.params.size(); ++i) {
+    out->append(stmt.params[i]);
+    if (i < stmt.params.size() - 1) {
+      out->append(", ");
+    }
+  }
+  out->append(")\n");
+  AppendToString(*stmt.body, out, indent + 1);
+}
+
+void AppendToString(const Statement& stmt, std::string* out, int indent) {
+  std::visit(
+      [out, indent](const auto& node) { AppendToString(node, out, indent); },
+      stmt.node);
+}
+
+void AppendToString(const Block& block, std::string* out, int indent) {
+  AppendIndent(out, indent);
+  out->append("Block\n");
+  for (const auto& stmt : block.statements) {
+    AppendToString(stmt, out, indent + 1);
+  }
 }
 
 }  // namespace
 
+std::string ToString(const Expression& expr) {
+  return ToIndentedString(expr, 0);
+}
+
+std::string ToString(const Statement& stmt) {
+  return ToIndentedString(stmt, 0);
+}
+
+std::string ToString(const Block& block) { return ToIndentedString(block, 0); }
+
 void PrintTo(const LiteralExpression& expr, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "LiteralExpression: " << expr.value.ToString() << "\n";
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const VariableExpression& expr, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "VariableExpression: " << expr.name << "\n";
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const UnaryExpression& expr, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "UnaryExpression: " << expr.op << "\n";
-  PrintTo(*expr.rhs, out, indent + 1);
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const BinaryExpression& expr, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "BinaryExpression: " << expr.op << "\n";
-  PrintTo(*expr.lhs, out, indent + 1);
-  PrintTo(*expr.rhs, out, indent + 1);
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const FunctionCallExpression& expr, std::ostream* out,
              int indent) {
-  PrintIndent(out, indent);
-  *out << "FunctionCallExpression\n";
-  PrintIndent(out, indent + 1);
-  *out << "Callee:\n";
-  PrintTo(*expr.callee, out, indent + 2);
-  PrintIndent(out, indent + 1);
-  *out << "Arguments:\n";
-  for (const auto& arg : expr.arguments) {
-    PrintTo(arg, out, indent + 2);
-  }
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const Expression& expr, std::ostream* out, int indent) {
-  std::visit([out, indent](const auto& node) { PrintTo(node, out, indent); },
-             expr.node);
+  StreamNode(expr, out, indent);
 }
 
 void PrintTo(const ExpressionStatement& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "ExpressionStatement\n";
-  PrintTo(stmt.expression, out, indent + 1);
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const ReturnStatement& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "ReturnStatement\n";
-  if (stmt.expression) {
-    PrintTo(*stmt.expression, out, indent + 1);
-  }
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const VariableDeclaration& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "VariableDeclaration: " << stmt.name << "\n";
-  if (stmt.initializer) {
-    PrintTo(*stmt.initializer, out, indent + 1);
-  }
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const Assignment& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "Assignment\n";
-  PrintTo(stmt.variable, out, indent + 1);
-  PrintTo(stmt.value, out, indent + 1);
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const IfStatement& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "IfStatement\n";
-  PrintIndent(out, indent + 1);
-  *out << "Condition:\n";
-  PrintTo(stmt.condition, out, indent + 2);
-  PrintIndent(out, indent + 1);
-  *out << "Then:\n";
-  PrintTo(*stmt.then_branch, out, indent + 2);
-  if (stmt.else_branch) {
-    PrintIndent(out, indent + 1);
-    *out << "Else:\n";
-    PrintTo(*stmt.else_branch, out, indent + 2);
-  }
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const FunctionDeclaration& stmt, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "FunctionDeclaration: " << stmt.name << "(";
-  for (size_t i = 0; i < stmt.params.size(); ++i) {
-    *out << stmt.params[i];
-    if (i < stmt.params.size() - 1) {
-      *out << ", ";
-    }
-  }
-  *out << ")\n";
-  PrintTo(*stmt.body, out, indent + 1);
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const Statement& stmt, std::ostream* out, int indent) {
-  std::visit([out, indent](const auto& node) { PrintTo(node, out, indent); },
-             stmt.node);
+  StreamNode(stmt, out, indent);
 }
 
 void PrintTo(const Block& block, std::ostream* out, int indent) {
-  PrintIndent(out, indent);
-  *out << "Block\n";
-  for (const auto& stmt : block.statements) {
-    PrintTo(stmt, out, indent + 1);
-  }
+  StreamNode(block, out, indent);
 }
 
 void PrintTo(const Program& program, std::ostream* out) {
-  *out << "\n";
-  PrintTo(static_cast<const Block&>(program), out, 0);
+  *out << ToString(static_cast<const Block&>(program));
 }
 
 void PrintTo(const Statement& stmt, std::ostream* out) {
-  PrintTo(stmt, out, 0);
+  *out << ToString(stmt);
 }
 
 void PrintTo(const Expression& expr, std::ostream* out) {
-  PrintTo(expr, out, 0);
+  *out << ToString(expr);
 }
 
 }  // namespace lualike::ast

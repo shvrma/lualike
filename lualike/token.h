@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LUALIKE_TOKEN_H_
+#define LUALIKE_TOKEN_H_
 
 #include <cstdint>
 #include <optional>
@@ -124,3 +125,5 @@ inline const std::unordered_map<std::string_view, TokenKind>
 };
 
 }  // namespace lualike::token
+
+#endif  // LUALIKE_TOKEN_H_

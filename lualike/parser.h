@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LUALIKE_PARSER_H_
+#define LUALIKE_PARSER_H_
 
 #include <algorithm>
 #include <cstdint>
@@ -21,45 +22,8 @@
 
 namespace lualike::parser {
 
-enum class ParserErrKind : uint8_t {
-  kUnexpectedToken,
-  kExpectedExpression,
-  kExpectedIdentifier,
-  kInternalError,
-};
-
-struct ParserErr : std::exception {
-  ParserErrKind kind;
-  std::variant<std::monostate, std::exception_ptr> error;
-  mutable std::string message_;
-
-  explicit ParserErr(ParserErrKind kind)
-      : kind(kind), error(std::monostate{}) {}
-
-  explicit ParserErr(const std::exception&) noexcept
-      : kind(ParserErrKind::kInternalError), error(std::current_exception()) {}
-
-  const char* what() const noexcept override {
-    switch (kind) {
-      case ParserErrKind::kUnexpectedToken:
-        return "Unexpected token encountered";
-      case ParserErrKind::kExpectedExpression:
-        return "Expected an expression";
-      case ParserErrKind::kExpectedIdentifier:
-        return "Expected an identifier";
-      case ParserErrKind::kInternalError:
-        try {
-          std::rethrow_exception(std::get<std::exception_ptr>(error));
-        } catch (const std::exception& e) {
-          message_ = std::format("Internal parser error: {}", e.what());
-          return message_.c_str();
-        }
-
-        return "Internal parser error";
-    }
-
-    return "Unknown parser error";
-  }
+struct ParserErr : std::runtime_error {
+  explicit ParserErr(const char* msg) noexcept : std::runtime_error(msg) {}
 };
 
 template <std::ranges::view InputT>
@@ -101,9 +65,9 @@ std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
   } catch (const ParserErr& err) {
     return std::unexpected(err);
   } catch (const std::exception& e) {
-    return std::unexpected(ParserErr(e));
+    return std::unexpected(ParserErr("Internal parser error"));
   } catch (...) {
-    return std::unexpected(ParserErr(ParserErrKind::kInternalError));
+    return std::unexpected(ParserErr("Unknown parser error"));
   }
 }
 
@@ -154,30 +118,27 @@ inline value::LualikeValue TokenToValue(const token::Token& token) {
       const std::string_view data = token.token_data.value();
       return {std::string(data.substr(1, data.length() - 2))};
     }
-    case token::TokenKind::kIntLiteral: {
-      try {
-        return {std::stoi(std::string(token.token_data.value()))};
-      } catch (const std::exception&) {
-        throw ParserErr(ParserErrKind::kInternalError);
-      }
-    }
-    case token::TokenKind::kFloatLiteral: {
-      try {
-        return {std::stod(std::string(token.token_data.value()))};
-      } catch (const std::exception&) {
-        throw ParserErr(ParserErrKind::kInternalError);
-      }
-    }
+
+    case token::TokenKind::kIntLiteral:
+      return {std::stoi(std::string(token.token_data.value()))};
+
+    case token::TokenKind::kFloatLiteral:
+      return {std::stod(std::string(token.token_data.value()))};
+
     case token::TokenKind::kName:
       return {std::string(token.token_data.value())};
+
     case token::TokenKind::kKeywordTrue:
       return {true};
+
     case token::TokenKind::kKeywordFalse:
       return {false};
+
     case token::TokenKind::kKeywordNil:
       return {};
+
     default:
-      throw ParserErr(ParserErrKind::kUnexpectedToken);
+      throw ParserErr("Unexpected token encountered");
   }
 }
 
@@ -211,7 +172,7 @@ template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 const token::Token& Parser<InputT>::Peek() const {
   if (IsEOF()) {
-    throw ParserErr(ParserErrKind::kUnexpectedToken);
+    throw ParserErr("Unexpected end of file encountered");
   }
 
   return *iter_;
@@ -221,7 +182,7 @@ template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 token::Token Parser<InputT>::Advance() {
   if (IsEOF()) {
-    throw ParserErr(ParserErrKind::kUnexpectedToken);
+    throw ParserErr("Unexpected end of file encountered");
   }
 
   auto token = *iter_;
@@ -234,7 +195,9 @@ template <std::ranges::view InputT>
 token::Token Parser<InputT>::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
-    throw ParserErr(ParserErrKind::kUnexpectedToken);
+    throw ParserErr(
+        "Unexpected token encountered");  // TODO: Include expected and actual
+                                          // token kinds in error message.
   }
 
   return Advance();
@@ -391,8 +354,10 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
     case token::TokenKind::kKeywordFalse:
     case token::TokenKind::kKeywordNil:
       return {{ast::LiteralExpression{TokenToValue(token)}}};
+
     case token::TokenKind::kName:
       return {{ast::VariableExpression{std::string(token.token_data.value())}}};
+
     case token::TokenKind::kOtherMinus:
     case token::TokenKind::kKeywordNot: {
       constexpr int kUnaryPrecedence = 99;
@@ -402,14 +367,18 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
       return {{ast::UnaryExpression{oper, std::make_unique<ast::Expression>(
                                               ParseExpr(kUnaryPrecedence))}}};
     }
+
     case token::TokenKind::kOtherLeftParenthesis: {
       auto expr = ParseExpr();
       Consume(token::TokenKind::kOtherRightParenthesis);
       return expr;
     }
+
     default:
-      throw ParserErr(ParserErrKind::kExpectedExpression);
+      throw ParserErr("Expected expression");
   }
 }
 
 }  // namespace lualike::parser
+
+#endif  // LUALIKE_PARSER_H_

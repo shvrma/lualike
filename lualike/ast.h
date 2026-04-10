@@ -38,103 +38,79 @@ enum class BinaryOperator : uint8_t {
 
 struct LiteralExpression {
   value::LualikeValue value;
-
-  bool operator==(const LiteralExpression&) const = default;
 };
 
 struct VariableExpression {
   std::string name;
-
-  bool operator==(const VariableExpression&) const = default;
 };
 
 struct UnaryExpression {
   UnaryOperator op;
-  std::shared_ptr<Expression> rhs;
-
-  bool operator==(const UnaryExpression& other) const;
+  std::unique_ptr<Expression> rhs;
 };
 
 struct BinaryExpression {
   BinaryOperator op;
-  std::shared_ptr<Expression> lhs;
-  std::shared_ptr<Expression> rhs;
-
-  bool operator==(const BinaryExpression& other) const;
+  std::unique_ptr<Expression> lhs;
+  std::unique_ptr<Expression> rhs;
 };
 
 struct FunctionCallExpression {
-  std::shared_ptr<Expression> callee;
+  std::unique_ptr<Expression> callee;
   std::vector<Expression> arguments;
-
-  bool operator==(const FunctionCallExpression& other) const;
 };
 
 struct Expression {
   std::variant<LiteralExpression, VariableExpression, UnaryExpression,
                BinaryExpression, FunctionCallExpression>
       node;
-
-  bool operator==(const Expression&) const = default;
 };
 
 struct ExpressionStatement {
   Expression expression;
-
-  bool operator==(const ExpressionStatement&) const = default;
 };
 
 struct ReturnStatement {
   std::optional<Expression> expression;
-
-  bool operator==(const ReturnStatement&) const = default;
 };
 
 struct VariableDeclaration {
   std::string name;
   std::optional<Expression> initializer;
-
-  bool operator==(const VariableDeclaration&) const = default;
 };
 
 struct Assignment {
   VariableExpression variable;
   Expression value;
-
-  bool operator==(const Assignment&) const = default;
 };
 
 struct IfStatement {
   Expression condition;
-  std::shared_ptr<Block> then_branch;
-  std::shared_ptr<Block> else_branch;
-
-  bool operator==(const IfStatement& other) const;
+  std::unique_ptr<Block> then_branch;
+  std::unique_ptr<Block> else_branch;
 };
 
 struct FunctionDeclaration {
   std::string name;
   std::vector<std::string> params;
-  std::shared_ptr<Block> body;
-
-  bool operator==(const FunctionDeclaration& other) const;
+  std::unique_ptr<Block> body;
 };
 
 struct Statement {
   std::variant<ExpressionStatement, ReturnStatement, VariableDeclaration,
                Assignment, IfStatement, FunctionDeclaration>
       node;
-
-  bool operator==(const Statement&) const = default;
 };
 
 struct Block {
   std::vector<Statement> statements;
-
-  bool operator==(const Block&) const = default;
 };
 
 using Program = Block;
+
+std::string ToString(const Expression& expr);
+std::string ToString(const Statement& stmt);
+std::string ToString(const Block& block);
 
 void PrintTo(const Expression& expr, std::ostream* out, int indent);
 void PrintTo(const Statement& stmt, std::ostream* out, int indent);

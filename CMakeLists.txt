@@ -11,8 +11,6 @@ target_sources(
   PRIVATE lualike/ast.cc lualike/value.cc
   PUBLIC FILE_SET
          HEADERS
-         BASE_DIRS
-         ${CMAKE_CURRENT_SOURCE_DIR}
          FILES
          lualike/ast.h
          lualike/interpreter.h
@@ -33,8 +31,7 @@ if(LUALIKE_BUILD_TESTS)
   add_executable(
     lualike_test lualike/tests/lexer_test.cc lualike/tests/interpreter_test.cc
                  lualike/tests/parser_test.cc lualike/tests/value_test.cc)
-  target_link_libraries(lualike_test PRIVATE lualike GTest::gtest_main
-                                             GTest::gmock)
+  target_link_libraries(lualike_test PRIVATE lualike GTest::gmock_main)
 
   include(GoogleTest)
   gtest_discover_tests(lualike_test)

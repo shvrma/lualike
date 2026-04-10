@@ -1,59 +1,65 @@
 #include "lualike/parser.h"
 
-#include <memory>
+#include <string>
 #include <string_view>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lualike/ast.h"
-#include "lualike/value.h"
 
-using lualike::ast::Block;
-using lualike::ast::Expression;
-using lualike::ast::IfStatement;
-using lualike::ast::LiteralExpression;
-using lualike::ast::Program;
-using lualike::ast::ReturnStatement;
-using lualike::ast::Statement;
-using lualike::ast::VariableDeclaration;
 using lualike::parser::Parse;
-using lualike::value::LualikeValue;
 
-MATCHER_P(LualikeParsesTo, expected_ast, "") {
+MATCHER_P(LualikeParsesToAstDump, expected_dump, "") {
   const auto actual_ast = Parse(std::string_view{arg});
   if (!actual_ast.has_value()) {
     *result_listener << actual_ast.error().what();
     return false;
   }
 
-  return ExplainMatchResult(testing::Eq(expected_ast), actual_ast.value(),
-                            result_listener);
+  const auto actual_dump = lualike::ast::ToString(actual_ast.value());
+  if (actual_dump != expected_dump) {
+    *result_listener << "actual dump:\n" << actual_dump;
+    return false;
+  }
+
+  return true;
 }
 
 TEST(ParserTest, VariableDeclaration) {
-  ASSERT_THAT("local a = 1",
-              LualikeParsesTo(Program{{Statement{VariableDeclaration{
-                  "a", Expression{LiteralExpression{LualikeValue{1}}}}}}}));
+  ASSERT_THAT("local a = 1", LualikeParsesToAstDump(R"(Block
+  VariableDeclaration: a
+    LiteralExpression: Number <1>
+)"));
 
-  ASSERT_THAT("local a",
-              LualikeParsesTo(Program{{Statement{VariableDeclaration{"a"}}}}));
+  ASSERT_THAT("local a", LualikeParsesToAstDump(R"(Block
+  VariableDeclaration: a
+)"));
 }
 
 TEST(ParserTest, ReturnStatement) {
-  ASSERT_THAT("return 1",
-              LualikeParsesTo(Program{{Statement{ReturnStatement{
-                  Expression{LiteralExpression{LualikeValue{1}}}}}}}));
+  ASSERT_THAT("return 1", LualikeParsesToAstDump(R"(Block
+  ReturnStatement
+    LiteralExpression: Number <1>
+)"));
 
-  ASSERT_THAT("return",
-              LualikeParsesTo(Program{{Statement{ReturnStatement{}}}}));
+  ASSERT_THAT("return", LualikeParsesToAstDump(R"(Block
+  ReturnStatement
+)"));
 }
 
 TEST(ParserTest, IfStatement) {
   ASSERT_THAT("if true then return 1 else return 2 end",
-              LualikeParsesTo(Program{{Statement{IfStatement{
-                  Expression{LiteralExpression{LualikeValue{true}}},
-                  std::make_unique<Block>(Block{{Statement{ReturnStatement{
-                      Expression{LiteralExpression{LualikeValue{1}}}}}}}),
-                  std::make_unique<Block>(Block{{Statement{ReturnStatement{
-                      Expression{LiteralExpression{LualikeValue{2}}}}}}})}}}}));
+              LualikeParsesToAstDump(R"(Block
+  IfStatement
+    Condition:
+      LiteralExpression: True
+    Then:
+      Block
+        ReturnStatement
+          LiteralExpression: Number <1>
+    Else:
+      Block
+        ReturnStatement
+          LiteralExpression: Number <2>
+)"));
 }

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LUALIKE_VALUE_H_
+#define LUALIKE_VALUE_H_
 
 #include <compare>
 #include <cstdint>
@@ -84,3 +85,5 @@ struct LualikeValue {
 void PrintTo(const LualikeValue& value, std::ostream* os);
 
 }  // namespace lualike::value
+
+#endif  // LUALIKE_VALUE_H_

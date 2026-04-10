@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LUALIKE_LEXER_H_
+#define LUALIKE_LEXER_H_
 
 #include <cstdint>
 #include <exception>
@@ -47,7 +48,7 @@ template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 std::vector<token::Token> ReadTokens(InputT input);
 
-namespace detail {
+namespace {
 
 inline bool IsSpace(char symbol) noexcept {
   return symbol == ' ' || symbol == '\f' || symbol == '\n' || symbol == '\r' ||
@@ -66,7 +67,7 @@ inline bool IsAlphanumeric(char symbol) noexcept {
   return IsAlphabetic(symbol) || IsNumeric(symbol);
 }
 
-}  // namespace detail
+}  // namespace
 
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
@@ -98,7 +99,7 @@ token::Token Lexer<InputT>::ReadAlphanumeric() {
   while (iter_ != sentinel_) {
     const char symbol = *iter_;
 
-    if (detail::IsAlphanumeric(symbol) || symbol == '_') {
+    if (IsAlphanumeric(symbol) || symbol == '_') {
       ++iter_;
     } else {
       break;
@@ -144,7 +145,7 @@ token::Token Lexer<InputT>::ReadNumericConstant() {
       }
 
       has_met_fractional_part = true;
-    } else if (!detail::IsNumeric(symbol)) {
+    } else if (!IsNumeric(symbol)) {
       break;
     }
 
@@ -162,7 +163,7 @@ template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 std::optional<token::Token> Lexer<InputT>::NextToken() {
   while (iter_ != sentinel_) {
-    if (detail::IsSpace(*iter_)) {
+    if (IsSpace(*iter_)) {
       ++iter_;
       continue;
     }
@@ -186,12 +187,12 @@ std::optional<token::Token> Lexer<InputT>::NextToken() {
   token_start_iter_ = iter_;
   const char symbol = *iter_;
 
-  if (detail::IsAlphabetic(symbol) || symbol == '_') {
+  if (IsAlphabetic(symbol) || symbol == '_') {
     ++iter_;
     return {ReadAlphanumeric()};
   }
 
-  if (detail::IsNumeric(symbol)) {
+  if (IsNumeric(symbol)) {
     ++iter_;
     return {ReadNumericConstant()};
   }
@@ -247,3 +248,5 @@ std::vector<token::Token> ReadTokens(InputT input) {
 }
 
 }  // namespace lualike::lexer
+
+#endif  // LUALIKE_LEXER_H_
