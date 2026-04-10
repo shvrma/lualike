@@ -1,12 +1,12 @@
+#include "lualike/parser.h"
+
 #include <memory>
 #include <string_view>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-import lualike.ast;
-import lualike.parser;
-import lualike.value;
+#include "lualike/ast.h"
+#include "lualike/value.h"
 
 using lualike::ast::Block;
 using lualike::ast::Expression;
@@ -17,7 +17,7 @@ using lualike::ast::ReturnStatement;
 using lualike::ast::Statement;
 using lualike::ast::VariableDeclaration;
 using lualike::parser::Parse;
-using lualike::value::LualikeValue; 
+using lualike::value::LualikeValue;
 
 MATCHER_P(LualikeParsesTo, expected_ast, "") {
   const auto actual_ast = Parse(std::string_view{arg});

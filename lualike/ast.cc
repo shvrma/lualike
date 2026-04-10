@@ -1,193 +1,52 @@
-module;
+#include "lualike/ast.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <map>
-#include <memory>
-#include <optional>
-#include <ostream>
 #include <string>
 #include <string_view>
-#include <variant>
-#include <vector>
 
-export module lualike.ast;
+namespace {
 
-import lualike.value;
+template <typename T>
+bool SharedPtrEqual(const std::shared_ptr<T>& lhs,
+                    const std::shared_ptr<T>& rhs) {
+  if (!lhs || !rhs) {
+    return lhs == rhs;
+  }
 
-export namespace lualike::ast {
+  return *lhs == *rhs;
+}
 
-struct Expression;
-struct Statement;
-struct Block;
-
-enum class UnaryOperator : uint8_t { kNegate, kNot };
-enum class BinaryOperator : uint8_t {
-  kOr,
-  kAnd,
-  kLessThan,
-  kGreaterThan,
-  kLessThanEqual,
-  kGreaterThanEqual,
-  kNotEqual,
-  kEqual,
-  kAdd,
-  kSubtract,
-  kMultiply,
-  kDivide,
-  kFloorDivide,
-  kModulo,
-  kPower,
-};
-
-struct LiteralExpression {
-  value::LualikeValue value;
-
-  bool operator==(const LiteralExpression&) const = default;
-};
-
-struct VariableExpression {
-  std::string name;
-
-  bool operator==(const VariableExpression&) const = default;
-};
-
-struct UnaryExpression {
-  UnaryOperator op;
-  std::shared_ptr<Expression> rhs;
-
-  bool operator==(const UnaryExpression& other) const;
-};
-
-struct BinaryExpression {
-  BinaryOperator op;
-  std::shared_ptr<Expression> lhs;
-  std::shared_ptr<Expression> rhs;
-
-  bool operator==(const BinaryExpression& other) const;
-};
-
-struct FunctionCallExpression {
-  std::shared_ptr<Expression> callee;
-  std::vector<Expression> arguments;
-
-  bool operator==(const FunctionCallExpression& other) const;
-};
-
-struct Expression {
-  std::variant<LiteralExpression, VariableExpression, UnaryExpression,
-               BinaryExpression, FunctionCallExpression>
-      node;
-
-  bool operator==(const Expression&) const = default;
-};
-
-struct ExpressionStatement {
-  Expression expression;
-
-  bool operator==(const ExpressionStatement&) const = default;
-};
-
-struct ReturnStatement {
-  std::optional<Expression> expression;
-
-  bool operator==(const ReturnStatement&) const = default;
-};
-
-struct VariableDeclaration {
-  std::string name;
-  std::optional<Expression> initializer;
-
-  bool operator==(const VariableDeclaration&) const = default;
-};
-
-struct Assignment {
-  VariableExpression variable;
-  Expression value;
-
-  bool operator==(const Assignment&) const = default;
-};
-
-struct IfStatement {
-  Expression condition;
-  std::shared_ptr<Block> then_branch;
-  std::shared_ptr<Block> else_branch;
-
-  bool operator==(const IfStatement& other) const;
-};
-
-struct FunctionDeclaration {
-  std::string name;
-  std::vector<std::string> params;
-  std::shared_ptr<Block> body;
-
-  bool operator==(const FunctionDeclaration& other) const;
-};
-
-struct Statement {
-  std::variant<ExpressionStatement, ReturnStatement, VariableDeclaration,
-               Assignment, IfStatement, FunctionDeclaration>
-      node;
-
-  bool operator==(const Statement&) const = default;
-};
-
-struct Block {
-  std::vector<Statement> statements;
-
-  bool operator==(const Block&) const = default;
-};
-
-using Program = Block;
-
-void PrintTo(const Expression& expr, std::ostream* out, int indent);
-void PrintTo(const Statement& stmt, std::ostream* out, int indent);
-void PrintTo(const Block& block, std::ostream* out, int indent);
-void PrintTo(const LiteralExpression& expr, std::ostream* out, int indent);
-void PrintTo(const VariableExpression& expr, std::ostream* out, int indent);
-void PrintTo(const UnaryExpression& expr, std::ostream* out, int indent);
-void PrintTo(const BinaryExpression& expr, std::ostream* out, int indent);
-void PrintTo(const FunctionCallExpression& expr, std::ostream* out, int indent);
-void PrintTo(const ExpressionStatement& stmt, std::ostream* out, int indent);
-void PrintTo(const ReturnStatement& stmt, std::ostream* out, int indent);
-void PrintTo(const VariableDeclaration& stmt, std::ostream* out, int indent);
-void PrintTo(const Assignment& stmt, std::ostream* out, int indent);
-void PrintTo(const IfStatement& stmt, std::ostream* out, int indent);
-void PrintTo(const FunctionDeclaration& stmt, std::ostream* out, int indent);
-void PrintTo(const Program& program, std::ostream* out);
-void PrintTo(const Statement& stmt, std::ostream* out);
-void PrintTo(const Expression& expr, std::ostream* out);
-
-}  // namespace lualike::ast
+}  // namespace
 
 namespace lualike::ast {
 
-inline bool UnaryExpression::operator==(const UnaryExpression& other) const {
-  return op == other.op && *rhs == *other.rhs;
+bool UnaryExpression::operator==(const UnaryExpression& other) const {
+  return op == other.op && SharedPtrEqual(rhs, other.rhs);
 }
 
-inline bool BinaryExpression::operator==(const BinaryExpression& other) const {
-  return op == other.op && *lhs == *other.lhs && *rhs == *other.rhs;
+bool BinaryExpression::operator==(const BinaryExpression& other) const {
+  return op == other.op && SharedPtrEqual(lhs, other.lhs) &&
+         SharedPtrEqual(rhs, other.rhs);
 }
 
-inline bool FunctionCallExpression::operator==(
+bool FunctionCallExpression::operator==(
     const FunctionCallExpression& other) const {
-  return *callee == *other.callee && arguments == other.arguments;
+  return SharedPtrEqual(callee, other.callee) && arguments == other.arguments;
 }
 
-inline bool IfStatement::operator==(const IfStatement& other) const {
-  return condition == other.condition && *then_branch == *other.then_branch &&
-         *else_branch == *other.else_branch;
+bool IfStatement::operator==(const IfStatement& other) const {
+  return condition == other.condition &&
+         SharedPtrEqual(then_branch, other.then_branch) &&
+         SharedPtrEqual(else_branch, other.else_branch);
 }
 
-inline bool FunctionDeclaration::operator==(
-    const FunctionDeclaration& other) const {
-  return name == other.name && params == other.params && *body == *other.body;
+bool FunctionDeclaration::operator==(const FunctionDeclaration& other) const {
+  return name == other.name && params == other.params &&
+         SharedPtrEqual(body, other.body);
 }
 
-void PrintIndent(std::ostream* out, int indent);
-std::ostream& operator<<(std::ostream& out, UnaryOperator oper);
-std::ostream& operator<<(std::ostream& out, BinaryOperator oper);
+namespace {
 
 void PrintIndent(std::ostream* out, int indent) {
   *out << std::string(static_cast<size_t>(indent * 2), ' ');
@@ -198,7 +57,8 @@ std::ostream& operator<<(std::ostream& out, UnaryOperator oper) {
       {UnaryOperator::kNegate, "-"},
       {UnaryOperator::kNot, "not"},
   };
-  if (auto iter = kUnaryOperatorMap.find(oper);
+
+  if (const auto iter = kUnaryOperatorMap.find(oper);
       iter != kUnaryOperatorMap.end()) {
     return out << iter->second;
   }
@@ -225,13 +85,15 @@ std::ostream& operator<<(std::ostream& out, BinaryOperator oper) {
       {BinaryOperator::kPower, "^"},
   };
 
-  if (auto iter = kBinaryOperatorMap.find(oper);
+  if (const auto iter = kBinaryOperatorMap.find(oper);
       iter != kBinaryOperatorMap.end()) {
     return out << iter->second;
   }
 
   return out << "<unknown_binary_op>";
 }
+
+}  // namespace
 
 void PrintTo(const LiteralExpression& expr, std::ostream* out, int indent) {
   PrintIndent(out, indent);

@@ -1,10 +1,11 @@
+#include "lualike/interpreter.h"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <string_view>
 
-import lualike.interpreter;
-import lualike.value;
+#include "lualike/value.h"
 
 namespace lualike::interpreter {
 

@@ -10,10 +10,12 @@ Besides the learning purpose, the main reason for this is to provide a much ligh
 
 ## Prerequisites
 
-- A C++23 compiler with modules support (Clang 16+, MSVC 19+, GCC 14+)
-- CMake 3.28+ with Ninja as build system (or another one with modules enabled)
+- A C++23 compiler
+- CMake 3.28+
 
-Ninja is required as it is one of the supporting tools for the C++ modules. You should also specify an appropriate CMake generator that targets Ninja (for example, with *-G* flag and *Ninja* generator - *-G Ninja*).
+If you want to build the tests, make sure `GTest` is available to CMake. With
+vcpkg, configure using your vcpkg toolchain file so `find_package(GTest CONFIG
+REQUIRED)` can resolve it.
 
 ## Usage
 
@@ -38,10 +40,10 @@ target_link_libraries(example_consumer PRIVATE lualike)
 The *main.cc* file itself:
 
 ```c++
-import lualike;
-
 #include <iostream>
 #include <string_view>
+
+#include "lualike/lualike.h"
 
 int main() {
   using namespace std::literals;
@@ -58,7 +60,8 @@ int main() {
 ```
 
 ```sh
-cmake -B build -G Ninja
+cmake -B build
+cmake --build build
 ```
 
 ## Literature used

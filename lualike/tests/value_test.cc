@@ -1,7 +1,7 @@
+#include "lualike/value.h"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
-import lualike.value;
 
 namespace lualike::value {
 

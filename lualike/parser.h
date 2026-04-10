@@ -1,26 +1,25 @@
-module;
+#pragma once
 
+#include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <expected>
 #include <format>
-#include <generator>
+#include <initializer_list>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
-export module lualike.parser;
+#include "lualike/ast.h"
+#include "lualike/lexer.h"
+#include "lualike/value.h"
 
-export import lualike.value;
-export import lualike.ast;
-import lualike.lexer;
-
-using lualike::ast::BinaryOperator;
-using lualike::token::Token;
-using lualike::token::TokenKind;
-using lualike::value::LualikeValue;
-
-export namespace lualike::parser {
+namespace lualike::parser {
 
 enum class ParserErrKind : uint8_t {
   kUnexpectedToken,
@@ -32,25 +31,22 @@ enum class ParserErrKind : uint8_t {
 struct ParserErr : std::exception {
   ParserErrKind kind;
   std::variant<std::monostate, std::exception_ptr> error;
-  mutable std::string message_;  // store generated message
+  mutable std::string message_;
 
   explicit ParserErr(ParserErrKind kind)
       : kind(kind), error(std::monostate{}) {}
 
-  explicit ParserErr(const std::exception& /*unused*/) noexcept
+  explicit ParserErr(const std::exception&) noexcept
       : kind(ParserErrKind::kInternalError), error(std::current_exception()) {}
 
   const char* what() const noexcept override {
     switch (kind) {
       case ParserErrKind::kUnexpectedToken:
         return "Unexpected token encountered";
-
       case ParserErrKind::kExpectedExpression:
         return "Expected an expression";
-
       case ParserErrKind::kExpectedIdentifier:
         return "Expected an identifier";
-
       case ParserErrKind::kInternalError:
         try {
           std::rethrow_exception(std::get<std::exception_ptr>(error));
@@ -60,45 +56,44 @@ struct ParserErr : std::exception {
         }
 
         return "Internal parser error";
-
-      default:
-        return "Unknown parser error";
     }
+
+    return "Unknown parser error";
   }
 };
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 class Parser {
- private:
-  // using TokensR = std::generator<Token>;
-  using TokensR = std::vector<Token>;
+  using TokensR = std::vector<token::Token>;
 
   TokensR tokens_;
   std::ranges::iterator_t<TokensR> iter_;
 
   bool IsEOF() const;
-  const Token& Peek() const;
-  Token Advance();
-  Token Consume(TokenKind kind);
-  bool Match(TokenKind kind);
+  const token::Token& Peek() const;
+  token::Token Advance();
+  token::Token Consume(token::TokenKind kind);
+  bool Match(token::TokenKind kind);
 
   ast::Statement ParseStmt();
   ast::ReturnStatement ParseRetStmt();
   ast::VariableDeclaration ParseVarDecl(bool is_local);
   ast::IfStatement ParseIfStmt();
-  ast::Block ParseBlock(std::initializer_list<TokenKind> end_tokens);
+  ast::Block ParseBlock(std::initializer_list<token::TokenKind> end_tokens);
   ast::ExpressionStatement ParseExprStmt();
   ast::Expression ParseExpr(int min_precedence = 0);
   ast::Expression ParsePrimExpr();
 
  public:
   explicit Parser(InputT input)
-      : tokens_(lexer::ReadTokens(input)), iter_(tokens_.begin()) {};
+      : tokens_(lexer::ReadTokens(input)), iter_(tokens_.begin()) {}
 
   ast::Program Parse();
 };
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
   try {
     Parser<InputT> parser(input);
@@ -112,91 +107,88 @@ std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
   }
 }
 
-}  // namespace lualike::parser
-
-// module :private;
-
-namespace lualike::parser {
-
-const std::unordered_map<TokenKind, int> kBinOpsPrecedences = {
-    {TokenKind::kKeywordOr, 1},          {TokenKind::kKeywordAnd, 2},
-    {TokenKind::kOtherLessThan, 3},      {TokenKind::kOtherGreaterThan, 3},
-    {TokenKind::kOtherLessThanEqual, 3}, {TokenKind::kOtherGreaterThanEqual, 3},
-    {TokenKind::kOtherTildeEqual, 3},    {TokenKind::kOtherDoubleEqual, 3},
-    {TokenKind::kOtherPlus, 9},          {TokenKind::kOtherMinus, 9},
-    {TokenKind::kOtherAsterisk, 10},     {TokenKind::kOtherSlash, 10},
-    {TokenKind::kOtherDoubleSlash, 10},  {TokenKind::kOtherPercent, 10},
-    {TokenKind::kOtherCaret, 11},
+inline const std::unordered_map<token::TokenKind, int> kBinOpsPrecedences = {
+    {token::TokenKind::kKeywordOr, 1},
+    {token::TokenKind::kKeywordAnd, 2},
+    {token::TokenKind::kOtherLessThan, 3},
+    {token::TokenKind::kOtherGreaterThan, 3},
+    {token::TokenKind::kOtherLessThanEqual, 3},
+    {token::TokenKind::kOtherGreaterThanEqual, 3},
+    {token::TokenKind::kOtherTildeEqual, 3},
+    {token::TokenKind::kOtherDoubleEqual, 3},
+    {token::TokenKind::kOtherPlus, 9},
+    {token::TokenKind::kOtherMinus, 9},
+    {token::TokenKind::kOtherAsterisk, 10},
+    {token::TokenKind::kOtherSlash, 10},
+    {token::TokenKind::kOtherDoubleSlash, 10},
+    {token::TokenKind::kOtherPercent, 10},
+    {token::TokenKind::kOtherCaret, 11},
 };
 
-const std::unordered_map<TokenKind, ast::BinaryOperator> kTokenToBinOp = {
-    {TokenKind::kKeywordOr, ast::BinaryOperator::kOr},
-    {TokenKind::kKeywordAnd, ast::BinaryOperator::kAnd},
-    {TokenKind::kOtherLessThan, ast::BinaryOperator::kLessThan},
-    {TokenKind::kOtherGreaterThan, ast::BinaryOperator::kGreaterThan},
-    {TokenKind::kOtherLessThanEqual, ast::BinaryOperator::kLessThanEqual},
-    {TokenKind::kOtherGreaterThanEqual, ast::BinaryOperator::kGreaterThanEqual},
-    {TokenKind::kOtherTildeEqual, ast::BinaryOperator::kNotEqual},
-    {TokenKind::kOtherDoubleEqual, ast::BinaryOperator::kEqual},
-    {TokenKind::kOtherPlus, ast::BinaryOperator::kAdd},
-    {TokenKind::kOtherMinus, ast::BinaryOperator::kSubtract},
-    {TokenKind::kOtherAsterisk, ast::BinaryOperator::kMultiply},
-    {TokenKind::kOtherSlash, ast::BinaryOperator::kDivide},
-    {TokenKind::kOtherDoubleSlash, ast::BinaryOperator::kFloorDivide},
-    {TokenKind::kOtherPercent, ast::BinaryOperator::kModulo},
-    {TokenKind::kOtherCaret, ast::BinaryOperator::kPower},
+inline const std::unordered_map<token::TokenKind, ast::BinaryOperator>
+    kTokenToBinOp = {
+        {token::TokenKind::kKeywordOr, ast::BinaryOperator::kOr},
+        {token::TokenKind::kKeywordAnd, ast::BinaryOperator::kAnd},
+        {token::TokenKind::kOtherLessThan, ast::BinaryOperator::kLessThan},
+        {token::TokenKind::kOtherGreaterThan,
+         ast::BinaryOperator::kGreaterThan},
+        {token::TokenKind::kOtherLessThanEqual,
+         ast::BinaryOperator::kLessThanEqual},
+        {token::TokenKind::kOtherGreaterThanEqual,
+         ast::BinaryOperator::kGreaterThanEqual},
+        {token::TokenKind::kOtherTildeEqual, ast::BinaryOperator::kNotEqual},
+        {token::TokenKind::kOtherDoubleEqual, ast::BinaryOperator::kEqual},
+        {token::TokenKind::kOtherPlus, ast::BinaryOperator::kAdd},
+        {token::TokenKind::kOtherMinus, ast::BinaryOperator::kSubtract},
+        {token::TokenKind::kOtherAsterisk, ast::BinaryOperator::kMultiply},
+        {token::TokenKind::kOtherSlash, ast::BinaryOperator::kDivide},
+        {token::TokenKind::kOtherDoubleSlash,
+         ast::BinaryOperator::kFloorDivide},
+        {token::TokenKind::kOtherPercent, ast::BinaryOperator::kModulo},
+        {token::TokenKind::kOtherCaret, ast::BinaryOperator::kPower},
 };
 
-
-LualikeValue TokenToValue(const Token& token) {
+inline value::LualikeValue TokenToValue(const token::Token& token) {
   switch (token.token_kind) {
-    case TokenKind::kStringLiteral: {
-      std::string_view data = token.token_data.value();
-      // Remove quotes
+    case token::TokenKind::kStringLiteral: {
+      const std::string_view data = token.token_data.value();
       return {std::string(data.substr(1, data.length() - 2))};
     }
-
-    case TokenKind::kIntLiteral: {
+    case token::TokenKind::kIntLiteral: {
       try {
         return {std::stoi(std::string(token.token_data.value()))};
       } catch (const std::exception&) {
         throw ParserErr(ParserErrKind::kInternalError);
       }
     }
-
-    case TokenKind::kFloatLiteral: {
+    case token::TokenKind::kFloatLiteral: {
       try {
         return {std::stod(std::string(token.token_data.value()))};
       } catch (const std::exception&) {
-        // This should ideally not be reached if the lexer is correct
         throw ParserErr(ParserErrKind::kInternalError);
       }
     }
-
-    case TokenKind::kName:
+    case token::TokenKind::kName:
       return {std::string(token.token_data.value())};
-
-    case TokenKind::kKeywordTrue:
+    case token::TokenKind::kKeywordTrue:
       return {true};
-
-    case TokenKind::kKeywordFalse:
+    case token::TokenKind::kKeywordFalse:
       return {false};
-
-    case TokenKind::kKeywordNil:
+    case token::TokenKind::kKeywordNil:
       return {};
-
     default:
       throw ParserErr(ParserErrKind::kUnexpectedToken);
   }
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::Program Parser<InputT>::Parse() {
   ast::Program program;
   auto& stmts = program.statements;
 
   while (!IsEOF()) {
-    while (Match(TokenKind::kOtherSemicolon)) {
+    while (Match(token::TokenKind::kOtherSemicolon)) {
     }
 
     if (IsEOF()) {
@@ -210,12 +202,14 @@ ast::Program Parser<InputT>::Parse() {
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 bool Parser<InputT>::IsEOF() const {
   return iter_ == tokens_.end();
 }
 
 template <std::ranges::view InputT>
-const Token& Parser<InputT>::Peek() const {
+  requires std::ranges::random_access_range<InputT>
+const token::Token& Parser<InputT>::Peek() const {
   if (IsEOF()) {
     throw ParserErr(ParserErrKind::kUnexpectedToken);
   }
@@ -224,17 +218,20 @@ const Token& Parser<InputT>::Peek() const {
 }
 
 template <std::ranges::view InputT>
-Token Parser<InputT>::Advance() {
+  requires std::ranges::random_access_range<InputT>
+token::Token Parser<InputT>::Advance() {
   if (IsEOF()) {
     throw ParserErr(ParserErrKind::kUnexpectedToken);
   }
+
   auto token = *iter_;
   ++iter_;
   return token;
 }
 
 template <std::ranges::view InputT>
-Token Parser<InputT>::Consume(TokenKind kind) {
+  requires std::ranges::random_access_range<InputT>
+token::Token Parser<InputT>::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
     throw ParserErr(ParserErrKind::kUnexpectedToken);
@@ -244,44 +241,42 @@ Token Parser<InputT>::Consume(TokenKind kind) {
 }
 
 template <std::ranges::view InputT>
-bool Parser<InputT>::Match(TokenKind kind) {
+  requires std::ranges::random_access_range<InputT>
+bool Parser<InputT>::Match(token::TokenKind kind) {
   if (IsEOF() || Peek().token_kind != kind) {
     return false;
   }
 
   Advance();
-
   return true;
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::Statement Parser<InputT>::ParseStmt() {
-  while (Match(TokenKind::kOtherSemicolon)) {
+  while (Match(token::TokenKind::kOtherSemicolon)) {
   }
 
   switch (Peek().token_kind) {
-    case TokenKind::kName:
+    case token::TokenKind::kName:
       return {ParseVarDecl(false)};
-
-    case TokenKind::kKeywordReturn:
+    case token::TokenKind::kKeywordReturn:
       return {ParseRetStmt()};
-
-    case TokenKind::kKeywordLocal:
+    case token::TokenKind::kKeywordLocal:
       return {ParseVarDecl(true)};
-
-    case TokenKind::kKeywordIf:
+    case token::TokenKind::kKeywordIf:
       return {ParseIfStmt()};
-
     default:
       return {ParseExprStmt()};
   }
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
   Advance();
 
-  if (IsEOF() || Peek().token_kind == TokenKind::kOtherSemicolon) {
+  if (IsEOF() || Peek().token_kind == token::TokenKind::kOtherSemicolon) {
     return {std::nullopt};
   }
 
@@ -289,15 +284,16 @@ ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
   if (is_local) {
-    Consume(TokenKind::kKeywordLocal);
+    Consume(token::TokenKind::kKeywordLocal);
   }
 
-  auto name_token = Consume(TokenKind::kName);
+  const auto name_token = Consume(token::TokenKind::kName);
 
   std::optional<ast::Expression> initializer;
-  if (Match(TokenKind::kOtherEqual)) {
+  if (Match(token::TokenKind::kOtherEqual)) {
     initializer = ParseExpr();
   }
 
@@ -305,34 +301,36 @@ ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::IfStatement Parser<InputT>::ParseIfStmt() {
   Advance();
 
   auto condition = ParseExpr();
 
-  Consume(TokenKind::kKeywordThen);
-  auto then_branch = std::make_unique<ast::Block>(
-      ParseBlock({TokenKind::kKeywordElse, TokenKind::kKeywordEnd}));
+  Consume(token::TokenKind::kKeywordThen);
+  auto then_branch = std::make_unique<ast::Block>(ParseBlock(
+      {token::TokenKind::kKeywordElse, token::TokenKind::kKeywordEnd}));
 
   std::unique_ptr<ast::Block> else_branch;
-  if (Match(TokenKind::kKeywordElse)) {
-    else_branch =
-        std::make_unique<ast::Block>(ParseBlock({TokenKind::kKeywordEnd}));
+  if (Match(token::TokenKind::kKeywordElse)) {
+    else_branch = std::make_unique<ast::Block>(
+        ParseBlock({token::TokenKind::kKeywordEnd}));
   }
 
-  Consume(TokenKind::kKeywordEnd);
+  Consume(token::TokenKind::kKeywordEnd);
 
   return {std::move(condition), std::move(then_branch), std::move(else_branch)};
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::Block Parser<InputT>::ParseBlock(
-    std::initializer_list<TokenKind> end_tokens) {
+    std::initializer_list<token::TokenKind> end_tokens) {
   ast::Block block;
 
   while (!IsEOF() &&
          std::ranges::find(end_tokens, Peek().token_kind) == end_tokens.end()) {
-    while (Match(TokenKind::kOtherSemicolon)) {
+    while (Match(token::TokenKind::kOtherSemicolon)) {
     }
 
     if (IsEOF() ||
@@ -347,26 +345,28 @@ ast::Block Parser<InputT>::ParseBlock(
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::ExpressionStatement Parser<InputT>::ParseExprStmt() {
   return {ParseExpr()};
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
   auto lhs = ParsePrimExpr();
 
   while (!IsEOF()) {
     const auto prec_it = kBinOpsPrecedences.find(Peek().token_kind);
-    int precedence =
-        (prec_it != kBinOpsPrecedences.end()) ? prec_it->second : -1;
+    const int precedence =
+        prec_it != kBinOpsPrecedences.end() ? prec_it->second : -1;
     if (precedence < min_precedence) {
       break;
     }
 
     auto op_token = Advance();
-    int next_precedence = (op_token.token_kind == TokenKind::kOtherCaret)
-                              ? precedence
-                              : precedence + 1;
+    const int next_precedence =
+        op_token.token_kind == token::TokenKind::kOtherCaret ? precedence
+                                                             : precedence + 1;
     auto rhs = ParseExpr(next_precedence);
 
     lhs.node = ast::BinaryExpression{
@@ -374,41 +374,39 @@ ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
         std::make_unique<ast::Expression>(std::move(lhs)),
         std::make_unique<ast::Expression>(std::move(rhs))};
   }
+
   return lhs;
 }
 
 template <std::ranges::view InputT>
+  requires std::ranges::random_access_range<InputT>
 ast::Expression Parser<InputT>::ParsePrimExpr() {
   const auto token = Advance();
 
   switch (token.token_kind) {
-    case TokenKind::kStringLiteral:
-    case TokenKind::kIntLiteral:
-    case TokenKind::kFloatLiteral:
-    case TokenKind::kKeywordTrue:
-    case TokenKind::kKeywordFalse:
-    case TokenKind::kKeywordNil:
+    case token::TokenKind::kStringLiteral:
+    case token::TokenKind::kIntLiteral:
+    case token::TokenKind::kFloatLiteral:
+    case token::TokenKind::kKeywordTrue:
+    case token::TokenKind::kKeywordFalse:
+    case token::TokenKind::kKeywordNil:
       return {{ast::LiteralExpression{TokenToValue(token)}}};
-
-    case TokenKind::kName:
+    case token::TokenKind::kName:
       return {{ast::VariableExpression{std::string(token.token_data.value())}}};
-
-    case TokenKind::kOtherMinus:
-    case TokenKind::kKeywordNot: {
-      const auto unary_prec = 99;  // Higher than any binary operator
-      const auto oper = (token.token_kind == TokenKind::kOtherMinus)
+    case token::TokenKind::kOtherMinus:
+    case token::TokenKind::kKeywordNot: {
+      constexpr int kUnaryPrecedence = 99;
+      const auto oper = token.token_kind == token::TokenKind::kOtherMinus
                             ? ast::UnaryOperator::kNegate
                             : ast::UnaryOperator::kNot;
-      return {{ast::UnaryExpression{
-          oper, std::make_unique<ast::Expression>(ParseExpr(unary_prec))}}};
+      return {{ast::UnaryExpression{oper, std::make_unique<ast::Expression>(
+                                              ParseExpr(kUnaryPrecedence))}}};
     }
-
-    case TokenKind::kOtherLeftParenthesis: {
+    case token::TokenKind::kOtherLeftParenthesis: {
       auto expr = ParseExpr();
-      Consume(TokenKind::kOtherRightParenthesis);
+      Consume(token::TokenKind::kOtherRightParenthesis);
       return expr;
     }
-
     default:
       throw ParserErr(ParserErrKind::kExpectedExpression);
   }

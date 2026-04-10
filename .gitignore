@@ -48,3 +48,5 @@ CMakeUserPresets.json
 
 build
 .cache
+
+vcpkg_installed

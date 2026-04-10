@@ -1,18 +1,16 @@
-module;
+#pragma once
 
 #include <cstdint>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
 
-export module lualike.token;
-
-export namespace lualike::token {
+namespace lualike::token {
 
 enum class TokenKind : uint8_t {
   kNone,
 
-  kName,  // Same as identifier
+  kName,
   kStringLiteral,
   kIntLiteral,
   kFloatLiteral,
@@ -45,10 +43,10 @@ enum class TokenKind : uint8_t {
   kOtherAsterisk,
   kOtherSlash,
   kOtherPercent,
-  kOtherCaret,  // ^
+  kOtherCaret,
   kOtherDoubleSlash,
   kOtherDoubleEqual,
-  kOtherTildeEqual,  // ~=
+  kOtherTildeEqual,
   kOtherLessThanEqual,
   kOtherGreaterThanEqual,
   kOtherLessThan,
@@ -72,10 +70,10 @@ struct Token {
   int span_start = -1;
   int span_end = -1;
 
-  bool operator==(const Token &rhs) const = default;
+  bool operator==(const Token& rhs) const = default;
 };
 
-const std::unordered_map<std::string_view, TokenKind> kKeywordsMap = {
+inline const std::unordered_map<std::string_view, TokenKind> kKeywordsMap = {
     {"and", TokenKind::kKeywordAnd},
     {"break", TokenKind::kKeywordBreak},
     {"do", TokenKind::kKeywordDo},
@@ -100,7 +98,7 @@ const std::unordered_map<std::string_view, TokenKind> kKeywordsMap = {
     {"while", TokenKind::kKeywordWhile},
 };
 
-const std::unordered_map<char, TokenKind> kOtherSingleCharTokensMap = {
+inline const std::unordered_map<char, TokenKind> kOtherSingleCharTokensMap = {
     {'+', TokenKind::kOtherPlus},
     {'-', TokenKind::kOtherMinus},
     {'*', TokenKind::kOtherAsterisk},
@@ -116,12 +114,13 @@ const std::unordered_map<char, TokenKind> kOtherSingleCharTokensMap = {
     {',', TokenKind::kOtherComma},
 };
 
-const std::unordered_map<std::string_view, TokenKind> kOtherTwoCharTokensMap = {
-    {"//", TokenKind::kOtherDoubleSlash},
-    {"==", TokenKind::kOtherDoubleEqual},
-    {"~=", TokenKind::kOtherTildeEqual},
-    {"<=", TokenKind::kOtherLessThanEqual},
-    {">=", TokenKind::kOtherGreaterThanEqual},
+inline const std::unordered_map<std::string_view, TokenKind>
+    kOtherTwoCharTokensMap = {
+        {"//", TokenKind::kOtherDoubleSlash},
+        {"==", TokenKind::kOtherDoubleEqual},
+        {"~=", TokenKind::kOtherTildeEqual},
+        {"<=", TokenKind::kOtherLessThanEqual},
+        {">=", TokenKind::kOtherGreaterThanEqual},
 };
 
 }  // namespace lualike::token

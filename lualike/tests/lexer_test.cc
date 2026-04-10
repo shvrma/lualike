@@ -1,11 +1,11 @@
+#include "lualike/lexer.h"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ranges>
 #include <string_view>
 #include <vector>
-
-import lualike.lexer;
 
 namespace token = lualike::token;
 
