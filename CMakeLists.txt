@@ -30,7 +30,8 @@ if(LUALIKE_BUILD_TESTS)
 
   add_executable(
     lualike_test lualike/tests/lexer_test.cc lualike/tests/interpreter_test.cc
-                 lualike/tests/parser_test.cc lualike/tests/value_test.cc)
+                 lualike/tests/parser_test.cc lualike/tests/value_test.cc
+                 lualike/tests/ast_test.cc)
   target_link_libraries(lualike_test PRIVATE lualike GTest::gmock_main)
 
   include(GoogleTest)

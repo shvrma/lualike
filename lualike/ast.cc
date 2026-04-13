@@ -18,9 +18,10 @@ std::string_view UnaryOperatorToString(UnaryOperator oper) {
       return "-";
     case UnaryOperator::kNot:
       return "not";
-  }
 
-  return "<unknown_unary_op>";
+    default:
+      throw std::runtime_error("Unknown UnaryOperator");
+  }
 }
 
 std::string_view BinaryOperatorToString(BinaryOperator oper) {
@@ -55,9 +56,10 @@ std::string_view BinaryOperatorToString(BinaryOperator oper) {
       return "%";
     case BinaryOperator::kPower:
       return "^";
-  }
 
-  return "<unknown_binary_op>";
+    default:
+      throw std::runtime_error("Unknown BinaryOperator");
+  }
 }
 
 void AppendToString(const Expression& expr, std::string* out, int indent);
