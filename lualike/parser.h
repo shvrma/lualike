@@ -23,7 +23,8 @@
 namespace lualike::parser {
 
 struct ParserErr : std::runtime_error {
-  explicit ParserErr(const char* msg) noexcept : std::runtime_error(msg) {}
+  explicit ParserErr(const std::string& msg) noexcept
+      : std::runtime_error(msg) {}
 };
 
 template <std::ranges::view InputT>
@@ -138,7 +139,9 @@ inline value::LualikeValue TokenToValue(const token::Token& token) {
       return {};
 
     default:
-      throw ParserErr("Unexpected token encountered");
+      throw ParserErr(std::format(
+          "Unexpected token encountered during TokenToValue: kind {}",
+          static_cast<int>(token.token_kind)));
   }
 }
 
@@ -182,7 +185,7 @@ template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 token::Token Parser<InputT>::Advance() {
   if (IsEOF()) {
-    throw ParserErr("Unexpected end of file encountered");
+    throw ParserErr("Unexpected end of file encountered while advancing");
   }
 
   auto token = *iter_;
@@ -195,9 +198,10 @@ template <std::ranges::view InputT>
 token::Token Parser<InputT>::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
-    throw ParserErr(
-        "Unexpected token encountered");  // TODO: Include expected and actual
-                                          // token kinds in error message.
+    throw ParserErr(std::format(
+        "Unexpected token expected kind {} but got {} at position {}",
+        static_cast<int>(kind), static_cast<int>(token.token_kind),
+        token.span_start));
   }
 
   return Advance();
@@ -375,7 +379,9 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
     }
 
     default:
-      throw ParserErr("Expected expression");
+      throw ParserErr(
+          std::format("Expected expression but found token {} at {}",
+                      static_cast<int>(token.token_kind), token.span_start));
   }
 }
 

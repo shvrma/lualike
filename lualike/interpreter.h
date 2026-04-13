@@ -24,7 +24,7 @@ namespace lualike::interpreter {
 struct InterpreterErr : std::runtime_error {
   std::exception_ptr internal_exception;
 
-  explicit InterpreterErr(const char* msg) noexcept : std::runtime_error(msg) {}
+  explicit InterpreterErr(const std::string& msg) : std::runtime_error(msg) {}
 
   explicit InterpreterErr() noexcept
       : std::runtime_error("Internal interpreter error"),
@@ -145,8 +145,7 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
       return find_result->second;
     }
 
-    throw InterpreterErr(
-        "Unknown variable");  // TODO: Include variable name in error message.
+    throw InterpreterErr(std::format("Unknown variable: '{}'", expr.name));
   } else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
     auto rhs = VisitExpression(*expr.rhs);
 
@@ -157,7 +156,7 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
         return !rhs;
     }
 
-    throw std::logic_error("Unimplemented unary operator");
+    throw InterpreterErr("Unimplemented unary operator");
   } else if constexpr (std::is_same_v<T, ast::BinaryExpression>) {
     auto lhs = VisitExpression(*expr.lhs);
 
@@ -204,9 +203,9 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
         break;
     }
 
-    throw std::logic_error("Unimplemented binary operator");
+    throw InterpreterErr("Unimplemented binary operator");
   } else {
-    throw std::logic_error("Unimplemented expression type");
+    throw InterpreterErr("Unimplemented expression type");
   }
 }
 
@@ -223,8 +222,7 @@ std::optional<value::LualikeValue> Interpreter::StmtVisitor(const StmtT& stmt) {
         local_names_.try_emplace(stmt.name, value);
     if (!was_successful) {
       throw InterpreterErr(
-          "Redeclaration of local variable");  // TODO: Include variable name in
-                                               // error message.
+          std::format("Redeclaration of local variable: '{}'", stmt.name));
     }
   } else if constexpr (std::is_same_v<T, ast::Assignment>) {
     auto value = VisitExpression(stmt.value);
