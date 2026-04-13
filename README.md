@@ -6,7 +6,8 @@ There is a lot still to do.
 
 Not a serious product, as I haven't taken any Compiler Theory class.
 
-Besides the learning purpose, the main reason for this is to provide a much lighter alternative (for example, without the coroutines support) with a clean and modern C++ API.
+Besides the learning purpose, the main reason for this is to provide a much lighter alternative
+(for example, without the coroutines support) with a clean and modern C++ API.
 
 ## Prerequisites
 
@@ -19,7 +20,7 @@ REQUIRED)` can resolve it.
 
 ## Usage
 
-`lualike::Interpret` function is the entry point that accepts a *std::ranges::view* of char's as an input (that is also to be a *std::ranges::random_access_range*).
+`lualike::Interpret` function is the entry point that accepts a *std::ranges::view* of char's as an input (that is also to be a *std::ranges::contiguous_range*).
 
 Possible CMake configuration:
 
