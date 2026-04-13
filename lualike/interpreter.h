@@ -21,6 +21,61 @@
 
 namespace lualike::interpreter {
 
+class Scope {
+  using NamesT = std::unordered_map<std::string, value::LualikeValue>;
+
+  NamesT names_;
+  std::optional<std::shared_ptr<Scope>> parent_scope_;
+
+ public:
+  explicit Scope(std::shared_ptr<Scope> parent_scope)
+      : parent_scope_(std::move(parent_scope)) {}
+
+  explicit Scope() = default;
+
+  std::optional<value::LualikeValue> Get(const std::string& name) const {
+    if (const auto it = names_.find(name); it != names_.end()) {
+      return it->second;
+    }
+
+    if (parent_scope_) {
+      return parent_scope_.value()->Get(name);
+    }
+
+    return std::nullopt;
+  }
+
+  void Set(const std::string& name, const value::LualikeValue& value) {
+    if (names_.find(name) != names_.end()) {
+      names_[name] = value;
+      return;
+    }
+
+    if (parent_scope_ && parent_scope_.value()->Get(name).has_value()) {
+      parent_scope_.value()->Set(name, value);
+      return;
+    }
+
+    names_[name] = value;
+  }
+};
+
+template <typename ExprT>
+value::LualikeValue ExprVisitor(const ExprT& expr,
+                                std::shared_ptr<Scope> scope);
+template <typename StmtT>
+std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt,
+                                               std::shared_ptr<Scope> scope);
+
+static bool IsTruthy(const value::LualikeValue& value);
+
+value::LualikeValue VisitExpression(const ast::Expression& expression,
+                                    std::shared_ptr<Scope> scope);
+std::optional<value::LualikeValue> VisitStatement(
+    const ast::Statement& statement, std::shared_ptr<Scope> scope);
+std::optional<value::LualikeValue> VisitBlock(const ast::Block& block,
+                                              std::shared_ptr<Scope> scope);
+
 struct InterpreterErr : std::runtime_error {
   std::exception_ptr internal_exception;
 
@@ -39,34 +94,6 @@ struct InterpreterErr : std::runtime_error {
         internal_exception(std::make_exception_ptr(parser_err)) {}
 };
 
-class Interpreter {
-  using NamesT = std::unordered_map<std::string, value::LualikeValue>;
-
-  NamesT local_names_;
-  std::shared_ptr<NamesT> global_names_;
-
-  static bool IsTruthy(const value::LualikeValue& value);
-
-  template <typename ExprT>
-  value::LualikeValue ExprVisitor(const ExprT& expr);
-  template <typename StmtT>
-  std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt);
-
-  value::LualikeValue VisitExpression(const ast::Expression& expression);
-  std::optional<value::LualikeValue> VisitStatement(
-      const ast::Statement& statement);
-  std::optional<value::LualikeValue> VisitBlock(const ast::Block& block);
-
-  explicit Interpreter(std::shared_ptr<NamesT> global_names)
-      : global_names_(std::move(global_names)) {}
-
- public:
-  template <std::ranges::view InputT>
-    requires std::ranges::random_access_range<InputT>
-  friend std::expected<std::optional<value::LualikeValue>, InterpreterErr>
-  Interpret(InputT input) noexcept;
-};
-
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
 std::expected<std::optional<value::LualikeValue>, InterpreterErr> Interpret(
@@ -77,8 +104,7 @@ std::expected<std::optional<value::LualikeValue>, InterpreterErr> Interpret(
       return std::unexpected(InterpreterErr(parse_result.error()));
     }
 
-    auto interpreter = Interpreter(std::make_shared<Interpreter::NamesT>());
-    return interpreter.VisitBlock(parse_result.value());
+    return VisitBlock(parse_result.value(), std::make_shared<Scope>());
   } catch (const InterpreterErr& err) {
     return std::unexpected(err);
   } catch (const lexer::LexerErr& err) {
@@ -90,33 +116,33 @@ std::expected<std::optional<value::LualikeValue>, InterpreterErr> Interpret(
   }
 }
 
-inline value::LualikeValue Interpreter::VisitExpression(
-    const ast::Expression& expression) {
-  return std::visit([this](const auto& expr) { return ExprVisitor(expr); },
-                    expression.node);
+inline value::LualikeValue VisitExpression(const ast::Expression& expression,
+                                           std::shared_ptr<Scope> scope) {
+  return std::visit(
+      [scope](const auto& expr) { return ExprVisitor(expr, scope); },
+      expression.node);
 }
 
-inline std::optional<value::LualikeValue> Interpreter::VisitStatement(
-    const ast::Statement& statement) {
-  return std::visit([this](const auto& stmt) { return StmtVisitor(stmt); },
-                    statement.node);
+inline std::optional<value::LualikeValue> VisitStatement(
+    const ast::Statement& statement, std::shared_ptr<Scope> scope) {
+  return std::visit(
+      [scope](const auto& stmt) { return StmtVisitor(stmt, scope); },
+      statement.node);
 }
 
-inline std::optional<value::LualikeValue> Interpreter::VisitBlock(
-    const ast::Block& block) {
-  NamesT original_locals = local_names_;
+inline std::optional<value::LualikeValue> VisitBlock(
+    const ast::Block& block, std::shared_ptr<Scope> scope) {
+  const auto inner_scope = std::make_shared<Scope>(scope);
   for (const auto& statement : block.statements) {
-    if (auto return_value = VisitStatement(statement)) {
-      local_names_ = original_locals;
+    if (auto return_value = VisitStatement(statement, inner_scope)) {
       return return_value;
     }
   }
-  local_names_ = original_locals;
 
   return std::nullopt;
 }
 
-inline bool Interpreter::IsTruthy(const value::LualikeValue& value) {
+inline bool IsTruthy(const value::LualikeValue& value) {
   if (std::holds_alternative<value::LualikeValue::NilT>(value.inner_value)) {
     return false;
   }
@@ -129,25 +155,24 @@ inline bool Interpreter::IsTruthy(const value::LualikeValue& value) {
 }
 
 template <typename ExprT>
-value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
+value::LualikeValue ExprVisitor(const ExprT& expr,
+                                std::shared_ptr<Scope> scope) {
   using T = std::decay_t<decltype(expr)>;
 
   if constexpr (std::is_same_v<T, ast::LiteralExpression>) {
     return expr.value;
-  } else if constexpr (std::is_same_v<T, ast::VariableExpression>) {
-    if (const auto find_result = local_names_.find(expr.name);
-        find_result != local_names_.end()) {
-      return find_result->second;
-    }
+  }
 
-    if (const auto find_result = global_names_->find(expr.name);
-        find_result != global_names_->end()) {
-      return find_result->second;
+  else if constexpr (std::is_same_v<T, ast::VariableExpression>) {
+    if (const auto val = scope->Get(expr.name)) {
+      return val.value();
     }
 
     throw InterpreterErr(std::format("Unknown variable: '{}'", expr.name));
-  } else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
-    auto rhs = VisitExpression(*expr.rhs);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
+    auto rhs = VisitExpression(*expr.rhs, scope);
 
     switch (expr.op) {
       case ast::UnaryOperator::kNegate:
@@ -157,17 +182,19 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
     }
 
     throw InterpreterErr("Unimplemented unary operator");
-  } else if constexpr (std::is_same_v<T, ast::BinaryExpression>) {
-    auto lhs = VisitExpression(*expr.lhs);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::BinaryExpression>) {
+    auto lhs = VisitExpression(*expr.lhs, scope);
 
     if (expr.op == ast::BinaryOperator::kAnd) {
-      return IsTruthy(lhs) ? VisitExpression(*expr.rhs) : lhs;
+      return IsTruthy(lhs) ? VisitExpression(*expr.rhs, scope) : lhs;
     }
     if (expr.op == ast::BinaryOperator::kOr) {
-      return IsTruthy(lhs) ? lhs : VisitExpression(*expr.rhs);
+      return IsTruthy(lhs) ? lhs : VisitExpression(*expr.rhs, scope);
     }
 
-    const auto rhs = VisitExpression(*expr.rhs);
+    const auto rhs = VisitExpression(*expr.rhs, scope);
 
     switch (expr.op) {
       case ast::BinaryOperator::kAdd:
@@ -204,52 +231,58 @@ value::LualikeValue Interpreter::ExprVisitor(const ExprT& expr) {
     }
 
     throw InterpreterErr("Unimplemented binary operator");
-  } else {
-    throw InterpreterErr("Unimplemented expression type");
   }
+
+  throw InterpreterErr("Unimplemented expression type");
 }
 
 template <typename StmtT>
-std::optional<value::LualikeValue> Interpreter::StmtVisitor(const StmtT& stmt) {
+std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt,
+                                               std::shared_ptr<Scope> scope) {
   using T = std::decay_t<decltype(stmt)>;
 
   if constexpr (std::is_same_v<T, ast::VariableDeclaration>) {
     value::LualikeValue value;
     if (stmt.initializer) {
-      value = VisitExpression(stmt.initializer.value());
+      value = VisitExpression(stmt.initializer.value(), scope);
     }
-    const auto [_iter, was_successful] =
-        local_names_.try_emplace(stmt.name, value);
-    if (!was_successful) {
-      throw InterpreterErr(
-          std::format("Redeclaration of local variable: '{}'", stmt.name));
-    }
-  } else if constexpr (std::is_same_v<T, ast::Assignment>) {
-    auto value = VisitExpression(stmt.value);
 
-    if (local_names_.contains(stmt.variable.name)) {
-      local_names_.at(stmt.variable.name) = value;
+    scope->Set(stmt.name, value);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::Assignment>) {
+    auto value = VisitExpression(stmt.value, scope);
+
+    if (const auto var_value = scope->Get(stmt.variable.name)) {
+      scope->Set(stmt.variable.name, value);
     } else {
-      global_names_->insert_or_assign(stmt.variable.name, value);
+      throw InterpreterErr(
+          std::format("Unknown variable: '{}'", stmt.variable.name));
     }
-  } else if constexpr (std::is_same_v<T, ast::IfStatement>) {
-    auto condition = VisitExpression(stmt.condition);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::IfStatement>) {
+    auto condition = VisitExpression(stmt.condition, scope);
 
     if (IsTruthy(condition)) {
-      return VisitBlock(*stmt.then_branch);
+      return VisitBlock(*stmt.then_branch, scope);
     }
 
     if (stmt.else_branch) {
-      return VisitBlock(*stmt.else_branch);
+      return VisitBlock(*stmt.else_branch, scope);
     }
-  } else if constexpr (std::is_same_v<T, ast::ReturnStatement>) {
+  }
+
+  else if constexpr (std::is_same_v<T, ast::ReturnStatement>) {
     if (stmt.expression.has_value()) {
-      return VisitExpression(stmt.expression.value());
+      return VisitExpression(stmt.expression.value(), scope);
     }
 
     return std::nullopt;
-  } else if constexpr (std::is_same_v<T, ast::ExpressionStatement>) {
-    VisitExpression(stmt.expression);
+  }
+
+  else if constexpr (std::is_same_v<T, ast::ExpressionStatement>) {
+    VisitExpression(stmt.expression, scope);
   }
 
   return std::nullopt;
