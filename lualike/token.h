@@ -67,9 +67,7 @@ enum class TokenKind : uint8_t {
 
 struct Token {
   TokenKind token_kind;
-  std::optional<std::string_view> token_data;
-  int span_start = -1;
-  int span_end = -1;
+  std::string_view source_span;
 
   bool operator==(const Token& rhs) const = default;
 };

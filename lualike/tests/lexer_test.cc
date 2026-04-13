@@ -15,14 +15,19 @@ using token::TokenKind;
 namespace lualike::lexer {
 
 MATCHER_P(LualikeSyntaticlyEqualsTo, valid_tokens_seq, "") {
-  const auto actual_tokens_seq = lexer::ReadTokens(std::string_view{arg}) |
-                                 std::ranges::to<std::vector<Token>>();
+  std::vector<Token> actual_tokens_seq;
+  auto input = std::string_view{arg};
+  Lexer<std::string_view> lexer(input);
+  while (auto token_opt = lexer.NextToken()) {
+    actual_tokens_seq.push_back(token_opt.value());
+  }
 
-  return std::ranges::equal(actual_tokens_seq, valid_tokens_seq,
-                            [](const Token& lhs, const Token& rhs) {
-                              return lhs.token_kind == rhs.token_kind &&
-                                     lhs.token_data == rhs.token_data;
-                            });
+  return std::ranges::equal(
+      actual_tokens_seq, valid_tokens_seq,
+      [](const Token& lhs, const Token& rhs) {
+        return lhs.token_kind == rhs.token_kind &&
+               (rhs.source_span.empty() || lhs.source_span == rhs.source_span);
+      });
 }
 
 TEST(LexerTest, ReadAndCompareWithValidSeqTest) {

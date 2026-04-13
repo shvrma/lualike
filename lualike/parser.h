@@ -28,12 +28,10 @@ struct ParserErr : std::runtime_error {
 };
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 class Parser {
-  using TokensR = std::vector<token::Token>;
-
-  TokensR tokens_;
-  std::ranges::iterator_t<TokensR> iter_;
+  lexer::Lexer<InputT> lexer_;
+  std::optional<token::Token> current_token_;
 
   bool IsEOF() const;
   const token::Token& Peek() const;
@@ -52,13 +50,13 @@ class Parser {
 
  public:
   explicit Parser(InputT input)
-      : tokens_(lexer::ReadTokens(input)), iter_(tokens_.begin()) {}
+      : lexer_(input), current_token_(lexer_.NextToken()) {}
 
   ast::Program Parse();
 };
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
   try {
     Parser<InputT> parser(input);
@@ -116,18 +114,18 @@ inline const std::unordered_map<token::TokenKind, ast::BinaryOperator>
 inline value::LualikeValue TokenToValue(const token::Token& token) {
   switch (token.token_kind) {
     case token::TokenKind::kStringLiteral: {
-      const std::string_view data = token.token_data.value();
+      const std::string_view data = token.source_span;
       return {std::string(data.substr(1, data.length() - 2))};
     }
 
     case token::TokenKind::kIntLiteral:
-      return {std::stoi(std::string(token.token_data.value()))};
+      return {std::stoi(std::string(token.source_span))};
 
     case token::TokenKind::kFloatLiteral:
-      return {std::stod(std::string(token.token_data.value()))};
+      return {std::stod(std::string(token.source_span))};
 
     case token::TokenKind::kName:
-      return {std::string(token.token_data.value())};
+      return {std::string(token.source_span)};
 
     case token::TokenKind::kKeywordTrue:
       return {true};
@@ -146,7 +144,7 @@ inline value::LualikeValue TokenToValue(const token::Token& token) {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::Program Parser<InputT>::Parse() {
   ast::Program program;
   auto& stmts = program.statements;
@@ -166,49 +164,49 @@ ast::Program Parser<InputT>::Parse() {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 bool Parser<InputT>::IsEOF() const {
-  return iter_ == tokens_.end();
+  return !current_token_.has_value();
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 const token::Token& Parser<InputT>::Peek() const {
   if (IsEOF()) {
     throw ParserErr("Unexpected end of file encountered");
   }
 
-  return *iter_;
+  return *current_token_;
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 token::Token Parser<InputT>::Advance() {
   if (IsEOF()) {
     throw ParserErr("Unexpected end of file encountered while advancing");
   }
 
-  auto token = *iter_;
-  ++iter_;
+  auto token = *current_token_;
+  current_token_ = lexer_.NextToken();
   return token;
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 token::Token Parser<InputT>::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
     throw ParserErr(std::format(
-        "Unexpected token expected kind {} but got {} at position {}",
+        "Unexpected token expected kind {} but got {} with value {}",
         static_cast<int>(kind), static_cast<int>(token.token_kind),
-        token.span_start));
+        token.source_span));
   }
 
   return Advance();
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 bool Parser<InputT>::Match(token::TokenKind kind) {
   if (IsEOF() || Peek().token_kind != kind) {
     return false;
@@ -219,7 +217,7 @@ bool Parser<InputT>::Match(token::TokenKind kind) {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::Statement Parser<InputT>::ParseStmt() {
   while (Match(token::TokenKind::kOtherSemicolon)) {
   }
@@ -239,7 +237,7 @@ ast::Statement Parser<InputT>::ParseStmt() {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
   Advance();
 
@@ -251,7 +249,7 @@ ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
   if (is_local) {
     Consume(token::TokenKind::kKeywordLocal);
@@ -264,11 +262,11 @@ ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
     initializer = ParseExpr();
   }
 
-  return {std::string(name_token.token_data.value()), std::move(initializer)};
+  return {std::string(name_token.source_span), std::move(initializer)};
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::IfStatement Parser<InputT>::ParseIfStmt() {
   Advance();
 
@@ -290,7 +288,7 @@ ast::IfStatement Parser<InputT>::ParseIfStmt() {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::Block Parser<InputT>::ParseBlock(
     std::initializer_list<token::TokenKind> end_tokens) {
   ast::Block block;
@@ -312,13 +310,13 @@ ast::Block Parser<InputT>::ParseBlock(
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::ExpressionStatement Parser<InputT>::ParseExprStmt() {
   return {ParseExpr()};
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
   auto lhs = ParsePrimExpr();
 
@@ -346,7 +344,7 @@ ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
 }
 
 template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
+  requires std::ranges::contiguous_range<InputT>
 ast::Expression Parser<InputT>::ParsePrimExpr() {
   const auto token = Advance();
 
@@ -360,7 +358,7 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
       return {{ast::LiteralExpression{TokenToValue(token)}}};
 
     case token::TokenKind::kName:
-      return {{ast::VariableExpression{std::string(token.token_data.value())}}};
+      return {{ast::VariableExpression{std::string(token.source_span)}}};
 
     case token::TokenKind::kOtherMinus:
     case token::TokenKind::kKeywordNot: {
@@ -380,8 +378,8 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
 
     default:
       throw ParserErr(
-          std::format("Expected expression but found token {} at {}",
-                      static_cast<int>(token.token_kind), token.span_start));
+          std::format("Expected expression but found token {} with value {}",
+                      static_cast<int>(token.token_kind), token.source_span));
   }
 }
 
