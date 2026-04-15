@@ -6,9 +6,10 @@
 #include <expected>
 #include <format>
 #include <initializer_list>
+#include <istream>
+#include <iterator>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -28,10 +29,44 @@ inline error::Error MakeParserError(
   return error::Error::Context(std::move(message), context_span);
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
+namespace detail {
+
+inline std::expected<std::string, error::Error> ReadStreamToString(
+    std::istream& input) noexcept {
+  try {
+    std::string source(std::istreambuf_iterator<char>(input), {});
+    if (input.bad()) {
+      return std::unexpected(
+          error::Error::Message("Failed to read input stream"));
+    }
+
+    return source;
+  } catch (const error::Error& err) {
+    return std::unexpected(err);
+  } catch (const std::exception&) {
+    return std::unexpected(
+        error::Error::FromCurrentException("Failed to read input stream"));
+  } catch (...) {
+    return std::unexpected(
+        error::Error::Message("Failed to read input stream"));
+  }
+}
+
+template <typename ResultT>
+inline std::expected<ResultT, error::Error> AttachSourceText(
+    std::expected<ResultT, error::Error> result, std::string source_text) {
+  if (!result) {
+    return std::unexpected(
+        std::move(result).error().AttachSourceText(std::move(source_text)));
+  }
+
+  return result;
+}
+
+}  // namespace detail
+
 class Parser {
-  lexer::Lexer<InputT> lexer_;
+  lexer::Lexer lexer_;
   std::optional<token::Token> current_token_;
   std::optional<token::Token> previous_token_;
 
@@ -53,7 +88,7 @@ class Parser {
   ast::Expression ParsePrimExpr();
 
  public:
-  explicit Parser(InputT input)
+  explicit Parser(std::string_view input)
       : lexer_(input), current_token_(lexer_.NextToken()) {}
 
   ast::Program Parse();
@@ -82,7 +117,8 @@ inline token::SourceSpan SpanFromStatements(
     return fallback;
   }
 
-  return token::MergeSourceSpans(statements.front().span, statements.back().span);
+  return token::MergeSourceSpans(statements.front().span,
+                                 statements.back().span);
 }
 
 inline const std::unordered_map<token::TokenKind, int> kBinOpsPrecedences = {
@@ -167,10 +203,12 @@ inline value::LualikeValue TokenToValue(const token::Token& token) {
   }
 }
 
+namespace detail {
+
 inline std::expected<ast::Program, error::Error> ParseSourceView(
     std::string_view input) noexcept {
   try {
-    Parser<std::string_view> parser(input);
+    Parser parser(input);
     return parser.Parse();
   } catch (error::Error& err) {
     return std::unexpected(std::move(err));
@@ -182,22 +220,27 @@ inline std::expected<ast::Program, error::Error> ParseSourceView(
   }
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-std::expected<ast::Program, error::Error> Parse(InputT input) noexcept {
-  std::string source(std::ranges::cbegin(input), std::ranges::cend(input));
-  auto parse_result = ParseSourceView(source);
-  if (!parse_result) {
-    return std::unexpected(
-        std::move(parse_result).error().AttachSourceText(std::move(source)));
-  }
+}  // namespace detail
 
-  return parse_result;
+inline std::expected<ast::Program, error::Error> Parse(
+    std::string_view input) noexcept {
+  return detail::AttachSourceText(detail::ParseSourceView(input),
+                                  std::string(input));
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::Program Parser<InputT>::Parse() {
+inline std::expected<ast::Program, error::Error> Parse(
+    std::istream& input) noexcept {
+  auto source_result = detail::ReadStreamToString(input);
+  if (!source_result) {
+    return std::unexpected(std::move(source_result).error());
+  }
+
+  std::string source = std::move(source_result).value();
+  auto ast_result = detail::ParseSourceView(source);
+  return detail::AttachSourceText(std::move(ast_result), std::move(source));
+}
+
+inline ast::Program Parser::Parse() {
   ast::Program program;
   auto& stmts = program.statements;
 
@@ -216,15 +259,9 @@ ast::Program Parser<InputT>::Parse() {
   return program;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-bool Parser<InputT>::IsEOF() const {
-  return !current_token_.has_value();
-}
+inline bool Parser::IsEOF() const { return !current_token_.has_value(); }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-token::SourceSpan Parser<InputT>::CurrentCursorSpan() const {
+inline token::SourceSpan Parser::CurrentCursorSpan() const {
   if (current_token_) {
     return current_token_->span;
   }
@@ -235,9 +272,7 @@ token::SourceSpan Parser<InputT>::CurrentCursorSpan() const {
   return {};
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-token::SourceSpan Parser<InputT>::SpanFrom(
+inline token::SourceSpan Parser::SpanFrom(
     const token::Token& start_token) const {
   if (previous_token_) {
     return token::MergeSourceSpans(start_token.span, previous_token_->span);
@@ -246,9 +281,7 @@ token::SourceSpan Parser<InputT>::SpanFrom(
   return start_token.span;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-const token::Token& Parser<InputT>::Peek() const {
+inline const token::Token& Parser::Peek() const {
   if (IsEOF()) {
     throw MakeParserError("Unexpected end of file encountered",
                           CurrentCursorSpan());
@@ -257,9 +290,7 @@ const token::Token& Parser<InputT>::Peek() const {
   return *current_token_;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-token::Token Parser<InputT>::Advance() {
+inline token::Token Parser::Advance() {
   if (IsEOF()) {
     throw MakeParserError("Unexpected end of file encountered while advancing",
                           CurrentCursorSpan());
@@ -271,24 +302,21 @@ token::Token Parser<InputT>::Advance() {
   return token;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-token::Token Parser<InputT>::Consume(token::TokenKind kind) {
+inline token::Token Parser::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
     throw MakeParserError(
-        std::format("Unexpected token expected kind {} but got {} with value {}",
-                    static_cast<int>(kind), static_cast<int>(token.token_kind),
-                    token.source_span),
+        std::format(
+            "Unexpected token expected kind {} but got {} with value {}",
+            static_cast<int>(kind), static_cast<int>(token.token_kind),
+            token.source_span),
         token.span);
   }
 
   return Advance();
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-bool Parser<InputT>::Match(token::TokenKind kind) {
+inline bool Parser::Match(token::TokenKind kind) {
   if (IsEOF() || Peek().token_kind != kind) {
     return false;
   }
@@ -297,9 +325,7 @@ bool Parser<InputT>::Match(token::TokenKind kind) {
   return true;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::Statement Parser<InputT>::ParseStmt() {
+inline ast::Statement Parser::ParseStmt() {
   while (Match(token::TokenKind::kOtherSemicolon)) {
   }
 
@@ -318,9 +344,7 @@ ast::Statement Parser<InputT>::ParseStmt() {
   }
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
+inline ast::ReturnStatement Parser::ParseRetStmt() {
   Advance();
 
   if (IsEOF() || Peek().token_kind == token::TokenKind::kOtherSemicolon) {
@@ -330,9 +354,7 @@ ast::ReturnStatement Parser<InputT>::ParseRetStmt() {
   return {ParseExpr()};
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
+inline ast::VariableDeclaration Parser::ParseVarDecl(bool is_local) {
   if (is_local) {
     Consume(token::TokenKind::kKeywordLocal);
   }
@@ -347,9 +369,7 @@ ast::VariableDeclaration Parser<InputT>::ParseVarDecl(bool is_local) {
   return {std::string(name_token.source_span), std::move(initializer)};
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::IfStatement Parser<InputT>::ParseIfStmt() {
+inline ast::IfStatement Parser::ParseIfStmt() {
   Advance();
 
   auto condition = ParseExpr();
@@ -369,9 +389,7 @@ ast::IfStatement Parser<InputT>::ParseIfStmt() {
   return {std::move(condition), std::move(then_branch), std::move(else_branch)};
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::Block Parser<InputT>::ParseBlock(
+inline ast::Block Parser::ParseBlock(
     std::initializer_list<token::TokenKind> end_tokens) {
   ast::Block block;
 
@@ -392,15 +410,11 @@ ast::Block Parser<InputT>::ParseBlock(
   return block;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::ExpressionStatement Parser<InputT>::ParseExprStmt() {
+inline ast::ExpressionStatement Parser::ParseExprStmt() {
   return {ParseExpr()};
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
+inline ast::Expression Parser::ParseExpr(int min_precedence) {
   auto lhs = ParsePrimExpr();
 
   while (!IsEOF()) {
@@ -418,19 +432,18 @@ ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
     auto rhs = ParseExpr(next_precedence);
     const auto expression_span = token::MergeSourceSpans(lhs.span, rhs.span);
 
-    lhs = MakeExpression(ast::BinaryExpression{
-                             kTokenToBinOp.at(op_token.token_kind),
-                             std::make_unique<ast::Expression>(std::move(lhs)),
-                             std::make_unique<ast::Expression>(std::move(rhs))},
-                         expression_span);
+    lhs = MakeExpression(
+        ast::BinaryExpression{
+            kTokenToBinOp.at(op_token.token_kind),
+            std::make_unique<ast::Expression>(std::move(lhs)),
+            std::make_unique<ast::Expression>(std::move(rhs))},
+        expression_span);
   }
 
   return lhs;
 }
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-ast::Expression Parser<InputT>::ParsePrimExpr() {
+inline ast::Expression Parser::ParsePrimExpr() {
   const auto token = Advance();
 
   switch (token.token_kind) {
@@ -444,8 +457,8 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
                             token.span);
 
     case token::TokenKind::kName:
-      return MakeExpression(ast::VariableExpression{std::string(token.source_span)},
-                            token.span);
+      return MakeExpression(
+          ast::VariableExpression{std::string(token.source_span)}, token.span);
 
     case token::TokenKind::kOtherMinus:
     case token::TokenKind::kKeywordNot: {
@@ -454,17 +467,18 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
                             ? ast::UnaryOperator::kNegate
                             : ast::UnaryOperator::kNot;
       auto rhs = ParseExpr(kUnaryPrecedence);
-      const auto expression_span = token::MergeSourceSpans(token.span, rhs.span);
-      return MakeExpression(ast::UnaryExpression{
-                                oper,
-                                std::make_unique<ast::Expression>(
-                                    std::move(rhs))},
-                            expression_span);
+      const auto expression_span =
+          token::MergeSourceSpans(token.span, rhs.span);
+      return MakeExpression(
+          ast::UnaryExpression{
+              oper, std::make_unique<ast::Expression>(std::move(rhs))},
+          expression_span);
     }
 
     case token::TokenKind::kOtherLeftParenthesis: {
       auto expr = ParseExpr();
-      const auto right_paren = Consume(token::TokenKind::kOtherRightParenthesis);
+      const auto right_paren =
+          Consume(token::TokenKind::kOtherRightParenthesis);
       expr.span = token::MergeSourceSpans(token.span, right_paren.span);
       return expr;
     }
