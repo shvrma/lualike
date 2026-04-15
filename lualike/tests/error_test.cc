@@ -28,7 +28,7 @@ TEST(ErrorTest, DeepCopiesErrorChains) {
 
   const auto copy = original;
 
-  EXPECT_EQ(copy.what(), original.what());
+  EXPECT_STREQ(copy.what(), original.what());
   EXPECT_EQ(copy.RenderPretty(), original.RenderPretty());
 }
 

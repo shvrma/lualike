@@ -20,7 +20,9 @@ REQUIRED)` can resolve it.
 
 ## Usage
 
-`lualike::Interpret` function is the entry point that accepts a *std::ranges::view* of char's as an input (that is also to be a *std::ranges::contiguous_range*).
+`lualike::Interpret` is the main entry point and accepts either a
+`std::string_view` or a `std::istream&`. The parser API follows the same
+convention via `lualike::parser::Parse`.
 
 Possible CMake configuration:
 
@@ -66,7 +68,7 @@ cmake -B build
 cmake --build build
 ```
 
-## Literature used
+## Literature Used
 
 - <https://compilers.iecc.com/crenshaw/>
 - <https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing>

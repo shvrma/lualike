@@ -17,7 +17,7 @@ namespace lualike::lexer {
 MATCHER_P(LualikeSyntaticlyEqualsTo, valid_tokens_seq, "") {
   std::vector<Token> actual_tokens_seq;
   auto input = std::string_view{arg};
-  Lexer<std::string_view> lexer(input);
+  Lexer lexer(input);
   while (auto token_opt = lexer.NextToken()) {
     actual_tokens_seq.push_back(token_opt.value());
   }

@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <istream>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -68,9 +68,9 @@ inline error::Error MakeInterpreterError(
 }
 
 template <typename ResultT, typename CallbackT>
-ResultT ExecuteWithForeignExceptionContext(
-    const std::string& message, token::SourceSpan context_span,
-    CallbackT&& callback) {
+ResultT ExecuteWithForeignExceptionContext(const std::string& message,
+                                           token::SourceSpan context_span,
+                                           CallbackT&& callback) {
   try {
     return std::forward<CallbackT>(callback)();
   } catch (const error::Error&) {
@@ -97,14 +97,39 @@ std::optional<value::LualikeValue> VisitStatement(
 std::optional<value::LualikeValue> VisitBlock(const ast::Block& block,
                                               std::shared_ptr<Scope> scope);
 
-template <std::ranges::view InputT>
-  requires std::ranges::random_access_range<InputT>
-std::expected<std::optional<value::LualikeValue>, error::Error> Interpret(
-    InputT input) noexcept {
-  std::string source(std::ranges::cbegin(input), std::ranges::cend(input));
+inline std::expected<std::optional<value::LualikeValue>, error::Error>
+Interpret(std::string_view input) noexcept {
+  try {
+    auto parse_result = parser::detail::ParseSourceView(input);
+    if (!parse_result) {
+      return std::unexpected(
+          std::move(parse_result).error().AttachSourceText(std::string(input)));
+    }
+
+    return VisitBlock(parse_result.value(), std::make_shared<Scope>());
+  } catch (error::Error& err) {
+    return std::unexpected(std::move(err).AttachSourceText(std::string(input)));
+  } catch (const std::exception&) {
+    return std::unexpected(
+        error::Error::FromCurrentException("Internal interpreter error")
+            .AttachSourceText(std::string(input)));
+  } catch (...) {
+    return std::unexpected(error::Error::Message("Unknown interpreter error")
+                               .AttachSourceText(std::string(input)));
+  }
+}
+
+inline std::expected<std::optional<value::LualikeValue>, error::Error>
+Interpret(std::istream& input) noexcept {
+  auto source_result = parser::detail::ReadStreamToString(input);
+  if (!source_result) {
+    return std::unexpected(std::move(source_result).error());
+  }
+
+  std::string source = std::move(source_result).value();
 
   try {
-    auto parse_result = parser::ParseSourceView(source);
+    auto parse_result = parser::detail::ParseSourceView(source);
     if (!parse_result) {
       return std::unexpected(
           std::move(parse_result).error().AttachSourceText(std::move(source)));
@@ -118,9 +143,8 @@ std::expected<std::optional<value::LualikeValue>, error::Error> Interpret(
         error::Error::FromCurrentException("Internal interpreter error")
             .AttachSourceText(std::move(source)));
   } catch (...) {
-    return std::unexpected(
-        error::Error::Message("Unknown interpreter error")
-            .AttachSourceText(std::move(source)));
+    return std::unexpected(error::Error::Message("Unknown interpreter error")
+                               .AttachSourceText(std::move(source)));
   }
 }
 
@@ -190,8 +214,7 @@ value::LualikeValue ExprVisitor(const ExprT& expr, token::SourceSpan span,
     switch (expr.op) {
       case ast::UnaryOperator::kNegate:
         return ExecuteWithForeignExceptionContext<value::LualikeValue>(
-            "Failed to evaluate unary negation", span,
-            [&rhs] { return -rhs; });
+            "Failed to evaluate unary negation", span, [&rhs] { return -rhs; });
       case ast::UnaryOperator::kNot:
         return ExecuteWithForeignExceptionContext<value::LualikeValue>(
             "Failed to evaluate logical negation", span,

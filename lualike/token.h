@@ -22,8 +22,8 @@ struct SourceSpan {
   bool operator==(const SourceSpan& rhs) const = default;
 };
 
-inline constexpr SourceSpan MergeSourceSpans(
-    const SourceSpan& lhs, const SourceSpan& rhs) noexcept {
+inline constexpr SourceSpan MergeSourceSpans(const SourceSpan& lhs,
+                                             const SourceSpan& rhs) noexcept {
   if (lhs.empty()) {
     return rhs;
   }

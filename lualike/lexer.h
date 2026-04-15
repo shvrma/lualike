@@ -4,9 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <ranges>
 #include <string_view>
-#include <vector>
 
 #include "lualike/error.h"
 #include "lualike/token.h"
@@ -65,54 +63,34 @@ inline bool IsAlphanumeric(char symbol) noexcept {
 
 }  // namespace
 
-template <std::ranges::contiguous_range InputT>
 class Lexer {
-  using IterT = std::ranges::const_iterator_t<InputT>;
-  using SentT = std::ranges::const_sentinel_t<InputT>;
+  std::string_view source_;
+  size_t cursor_{};
 
-  // *iter_* and *sentinel_* denotes the whole source range.
-  // *input_begin_* denotes the beginning of the current token (depends on what
-  // that token is).
+  token::Token ReadAlphanumeric(size_t start);
+  token::Token ReadShortLiteralString(char delimiter, size_t start);
+  token::Token ReadNumericConstant(size_t start);
 
-  IterT iter_;
-  SentT sentinel_;
-  IterT input_begin_;
-
-  token::SourceSpan MakeSpan(IterT begin, IterT end) const;
-  token::Token ReadAlphanumeric(IterT start);
-  token::Token ReadShortLiteralString(char delimiter, IterT start);
-  token::Token ReadNumericConstant(IterT start);
-
-  token::Token FillTokenData(token::Token t, IterT start);
+  token::Token FillTokenData(token::Token t, size_t start);
 
  public:
-  explicit Lexer(InputT input)
-      : iter_(std::ranges::cbegin(input)),
-        sentinel_(std::ranges::cend(input)),
-        input_begin_(std::ranges::cbegin(input)) {}
+  explicit Lexer(std::string_view input) : source_(input) {}
 
   std::optional<token::Token> NextToken();
 };
 
-template <std::ranges::contiguous_range InputT>
-token::SourceSpan Lexer<InputT>::MakeSpan(IterT begin, IterT end) const {
-  return {static_cast<size_t>(std::distance(input_begin_, begin)),
-          static_cast<size_t>(std::distance(input_begin_, end))};
-}
-
-template <std::ranges::contiguous_range InputT>
-token::Token Lexer<InputT>::ReadAlphanumeric(IterT start) {
-  while (iter_ != sentinel_) {
-    const char symbol = *iter_;
+inline token::Token Lexer::ReadAlphanumeric(size_t start) {
+  while (cursor_ < source_.size()) {
+    const char symbol = source_[cursor_];
 
     if (IsAlphanumeric(symbol) || symbol == '_') {
-      ++iter_;
+      ++cursor_;
     } else {
       break;
     }
   }
 
-  const std::string_view token_data(start, iter_);
+  const auto token_data = source_.substr(start, cursor_ - start);
 
   if (const auto find_result = token::kKeywordsMap.find(token_data);
       find_result != token::kKeywordsMap.cend()) {
@@ -122,33 +100,30 @@ token::Token Lexer<InputT>::ReadAlphanumeric(IterT start) {
   return {.token_kind = token::TokenKind::kName};
 }
 
-template <std::ranges::contiguous_range InputT>
-token::Token Lexer<InputT>::ReadShortLiteralString(
-    char delimiter, std::ranges::const_iterator_t<InputT> start) {
-  while (iter_ != sentinel_) {
-    const char symbol = *iter_;
-    ++iter_;
+inline token::Token Lexer::ReadShortLiteralString(char delimiter,
+                                                  size_t start) {
+  while (cursor_ < source_.size()) {
+    const char symbol = source_[cursor_];
+    ++cursor_;
 
     if (symbol == delimiter) {
       return {.token_kind = token::TokenKind::kStringLiteral};
     }
   }
 
-  throw MakeLexerError(LexerErrKind::kInvalidString, MakeSpan(start, iter_));
+  throw MakeLexerError(LexerErrKind::kInvalidString, {start, cursor_});
 }
 
-template <std::ranges::contiguous_range InputT>
-token::Token Lexer<InputT>::ReadNumericConstant(
-    std::ranges::const_iterator_t<InputT> start) {
+inline token::Token Lexer::ReadNumericConstant(size_t start) {
   bool has_met_fractional_part = false;
 
-  while (iter_ != sentinel_) {
-    const char symbol = *iter_;
+  while (cursor_ < source_.size()) {
+    const char symbol = source_[cursor_];
 
     if (symbol == '.' || symbol == ',') {
       if (has_met_fractional_part) {
         throw MakeLexerError(LexerErrKind::kInvalidNumber,
-                             MakeSpan(start, iter_ + 1));
+                             {start, cursor_ + 1});
       }
 
       has_met_fractional_part = true;
@@ -156,7 +131,7 @@ token::Token Lexer<InputT>::ReadNumericConstant(
       break;
     }
 
-    ++iter_;
+    ++cursor_;
   }
 
   if (has_met_fractional_part) {
@@ -166,73 +141,70 @@ token::Token Lexer<InputT>::ReadNumericConstant(
   return {.token_kind = token::TokenKind::kIntLiteral};
 }
 
-template <std::ranges::contiguous_range InputT>
-std::optional<token::Token> Lexer<InputT>::NextToken() {
-  while (iter_ != sentinel_) {
-    if (IsSpace(*iter_)) {
-      ++iter_;
-      continue;
+inline std::optional<token::Token> Lexer::NextToken() {
+  while (cursor_ < source_.size()) {
+    if (IsSpace(source_[cursor_])) {
+      ++cursor_;
     }
 
-    if (*iter_ == '-' && (iter_ + 1) != sentinel_ && *(iter_ + 1) == '-') {
-      iter_ += 2;
-      while (iter_ != sentinel_ && *iter_ != '\n') {
-        ++iter_;
+    else if (source_[cursor_] == '-' && cursor_ + 1 < source_.size() &&
+             source_[cursor_ + 1] == '-') {
+      cursor_ += 2;
+      while (cursor_ < source_.size() && source_[cursor_] != '\n') {
+        ++cursor_;
       }
 
-      continue;
     }
 
-    break;
+    else {
+      break;
+    }
   }
 
-  if (iter_ == sentinel_) {
+  if (cursor_ == source_.size()) {
     return std::nullopt;
   }
 
-  auto start = iter_;
-  const char symbol = *iter_;
+  const size_t start = cursor_;
+  const char symbol = source_[cursor_];
 
   if (IsAlphabetic(symbol) || symbol == '_') {
-    ++iter_;
+    ++cursor_;
     return FillTokenData(ReadAlphanumeric(start), start);
   }
 
   if (IsNumeric(symbol)) {
-    ++iter_;
+    ++cursor_;
     return FillTokenData(ReadNumericConstant(start), start);
   }
 
   if (symbol == '\'' || symbol == '\"') {
-    ++iter_;
+    ++cursor_;
     return FillTokenData(ReadShortLiteralString(symbol, start), start);
   }
 
-  if ((iter_ + 1) != sentinel_) {
+  if (cursor_ + 1 < source_.size()) {
     if (const auto find_result =
-            token::kOtherTwoCharTokensMap.find({iter_, iter_ + 2});
+            token::kOtherTwoCharTokensMap.find(source_.substr(cursor_, 2));
         find_result != token::kOtherTwoCharTokensMap.cend()) {
-      iter_ += 2;
+      cursor_ += 2;
       return FillTokenData({.token_kind = find_result->second}, start);
     }
   }
 
   const auto find_result = token::kOtherSingleCharTokensMap.find(symbol);
   if (find_result != token::kOtherSingleCharTokensMap.cend()) {
-    ++iter_;
+    ++cursor_;
     return FillTokenData({.token_kind = find_result->second}, start);
   }
 
-  throw MakeLexerError(LexerErrKind::kInvalidSymbol,
-                       MakeSpan(start, iter_ + 1));
+  throw MakeLexerError(LexerErrKind::kInvalidSymbol, {start, cursor_ + 1});
 }
 
-template <std::ranges::contiguous_range InputT>
-token::Token Lexer<InputT>::FillTokenData(token::Token next_token,
-                                          IterT start) {
-  next_token.source_span =
-      std::string_view(&*start, std::distance(start, iter_));
-  next_token.span = MakeSpan(start, iter_);
+inline token::Token Lexer::FillTokenData(token::Token next_token,
+                                         size_t start) {
+  next_token.source_span = source_.substr(start, cursor_ - start);
+  next_token.span = {start, cursor_};
   return next_token;
 }
 

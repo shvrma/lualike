@@ -1,5 +1,6 @@
 #include "lualike/parser.h"
 
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -62,4 +63,16 @@ TEST(ParserTest, IfStatement) {
         ReturnStatement
           LiteralExpression: Number <2>
 )"));
+}
+
+TEST(ParserTest, ReadsFromInputStream) {
+  std::istringstream input("return 1 + 2");
+  const auto actual_ast = Parse(input);
+  ASSERT_TRUE(actual_ast.has_value()) << actual_ast.error().what();
+  EXPECT_EQ(lualike::ast::ToString(actual_ast.value()), R"(Block
+  ReturnStatement
+    BinaryExpression: +
+      LiteralExpression: Number <1>
+      LiteralExpression: Number <2>
+)");
 }

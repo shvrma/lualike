@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <sstream>
 #include <string_view>
 
 #include "lualike/value.h"
@@ -77,6 +78,14 @@ TEST(InterpreterTest, InterpretValidProgramsTest) {
       "  return -1\n"
       "end\n",
       LualikeEvaluatesTo(3.14));
+}
+
+TEST(InterpreterTest, ReadsFromInputStream) {
+  std::istringstream input("return 2 + 5");
+  const auto eval_result = interpreter::Interpret(input);
+  ASSERT_TRUE(eval_result.has_value()) << eval_result.error().what();
+  ASSERT_TRUE(eval_result->has_value());
+  EXPECT_EQ(eval_result->value(), lualike::value::LualikeValue{7});
 }
 
 }  // namespace lualike::interpreter

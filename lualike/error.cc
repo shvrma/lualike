@@ -88,8 +88,8 @@ std::string RenderSpanSnippet(std::string_view source_text,
   const size_t column_begin = span.begin - line.line_begin;
   const size_t column_end = std::min(
       std::max(span.end, span.begin + static_cast<size_t>(1)), line.line_end);
-  const size_t caret_count =
-      std::max(column_end - line.line_begin - column_begin, static_cast<size_t>(1));
+  const size_t caret_count = std::max(
+      column_end - line.line_begin - column_begin, static_cast<size_t>(1));
   const auto line_number_text = std::to_string(line.line_number);
 
   std::ostringstream out;
@@ -158,7 +158,8 @@ std::exception_ptr ErrorBase::GetExceptionPtr() const noexcept {
   return exception_ptr_;
 }
 
-ContextError::ContextError(std::string message, std::unique_ptr<ErrorBase> source,
+ContextError::ContextError(std::string message,
+                           std::unique_ptr<ErrorBase> source,
                            std::optional<token::SourceSpan> context_span,
                            std::optional<CallStack> call_stack,
                            std::exception_ptr exception_ptr)
@@ -220,9 +221,9 @@ Error Error::FromException(std::string message, std::exception_ptr exception,
       std::move(exception)));
 }
 
-Error Error::FromCurrentException(
-    std::string message, std::optional<token::SourceSpan> context_span,
-    std::optional<CallStack> call_stack) {
+Error Error::FromCurrentException(std::string message,
+                                  std::optional<token::SourceSpan> context_span,
+                                  std::optional<CallStack> call_stack) {
   return FromException(std::move(message), std::current_exception(),
                        context_span, std::move(call_stack));
 }
@@ -344,9 +345,7 @@ std::string Error::RenderPlain() const {
   return out.str();
 }
 
-std::string Error::RenderPretty() const {
-  return RenderPretty(source_text_);
-}
+std::string Error::RenderPretty() const { return RenderPretty(source_text_); }
 
 std::string Error::RenderPretty(std::string_view source_text) const {
   if (source_text.empty()) {
