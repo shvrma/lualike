@@ -10,19 +10,19 @@ namespace {
 
 template <typename T>
 std::optional<LualikeValue::FloatT> CastToFloat(const T& value) {
-  using T = std::decay_t<T>;
+  using ValueT = std::decay_t<T>;
 
-  if constexpr (std::is_same_v<T, LualikeValue>) {
+  if constexpr (std::is_same_v<ValueT, LualikeValue>) {
     return std::visit(
         [](const auto& inner_value) { return CastToFloat(inner_value); },
         value.inner_value);
   }
 
-  else if constexpr (std::is_same_v<T, LualikeValue::IntT>) {
+  else if constexpr (std::is_same_v<ValueT, LualikeValue::IntT>) {
     return static_cast<LualikeValue::FloatT>(value);
   }
 
-  else if constexpr (std::is_same_v<T, LualikeValue::FloatT>) {
+  else if constexpr (std::is_same_v<ValueT, LualikeValue::FloatT>) {
     return value;
   }
 

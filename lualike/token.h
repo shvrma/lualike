@@ -1,12 +1,38 @@
 #ifndef LUALIKE_TOKEN_H_
 #define LUALIKE_TOKEN_H_
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
 
 namespace lualike::token {
+
+struct SourceSpan {
+  size_t begin{};
+  size_t end{};
+
+  constexpr bool empty() const noexcept { return begin >= end; }
+  constexpr size_t size() const noexcept {
+    return end > begin ? end - begin : 0;
+  }
+
+  bool operator==(const SourceSpan& rhs) const = default;
+};
+
+inline constexpr SourceSpan MergeSourceSpans(
+    const SourceSpan& lhs, const SourceSpan& rhs) noexcept {
+  if (lhs.empty()) {
+    return rhs;
+  }
+  if (rhs.empty()) {
+    return lhs;
+  }
+
+  return {std::min(lhs.begin, rhs.begin), std::max(lhs.end, rhs.end)};
+}
 
 enum class TokenKind : uint8_t {
   kNone,
@@ -68,6 +94,7 @@ enum class TokenKind : uint8_t {
 struct Token {
   TokenKind token_kind;
   std::string_view source_span;
+  SourceSpan span;
 
   bool operator==(const Token& rhs) const = default;
 };

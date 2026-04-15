@@ -8,11 +8,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(lualike)
 target_sources(
   lualike
-  PRIVATE lualike/ast.cc lualike/value.cc
+  PRIVATE lualike/ast.cc lualike/error.cc lualike/value.cc
   PUBLIC FILE_SET
          HEADERS
          FILES
          lualike/ast.h
+         lualike/error.h
          lualike/interpreter.h
          lualike/lexer.h
          lualike/lualike.h
@@ -31,7 +32,7 @@ if(LUALIKE_BUILD_TESTS)
   add_executable(
     lualike_test lualike/tests/lexer_test.cc lualike/tests/interpreter_test.cc
                  lualike/tests/parser_test.cc lualike/tests/value_test.cc
-                 lualike/tests/ast_test.cc)
+                 lualike/tests/ast_test.cc lualike/tests/error_test.cc)
   target_link_libraries(lualike_test PRIVATE lualike GTest::gmock_main)
 
   include(GoogleTest)

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <exception>
 #include <expected>
 #include <format>
 #include <initializer_list>
@@ -17,23 +16,28 @@
 #include <vector>
 
 #include "lualike/ast.h"
+#include "lualike/error.h"
 #include "lualike/lexer.h"
 #include "lualike/value.h"
 
 namespace lualike::parser {
 
-struct ParserErr : std::runtime_error {
-  explicit ParserErr(const std::string& msg) noexcept
-      : std::runtime_error(msg) {}
-};
+inline error::Error MakeParserError(
+    std::string message,
+    std::optional<token::SourceSpan> context_span = std::nullopt) {
+  return error::Error::Context(std::move(message), context_span);
+}
 
 template <std::ranges::view InputT>
   requires std::ranges::contiguous_range<InputT>
 class Parser {
   lexer::Lexer<InputT> lexer_;
   std::optional<token::Token> current_token_;
+  std::optional<token::Token> previous_token_;
 
   bool IsEOF() const;
+  token::SourceSpan CurrentCursorSpan() const;
+  token::SourceSpan SpanFrom(const token::Token& start_token) const;
   const token::Token& Peek() const;
   token::Token Advance();
   token::Token Consume(token::TokenKind kind);
@@ -55,19 +59,30 @@ class Parser {
   ast::Program Parse();
 };
 
-template <std::ranges::view InputT>
-  requires std::ranges::contiguous_range<InputT>
-std::expected<ast::Program, ParserErr> Parse(InputT input) noexcept {
-  try {
-    Parser<InputT> parser(input);
-    return parser.Parse();
-  } catch (const ParserErr& err) {
-    return std::unexpected(err);
-  } catch (const std::exception& e) {
-    return std::unexpected(ParserErr("Internal parser error"));
-  } catch (...) {
-    return std::unexpected(ParserErr("Unknown parser error"));
+template <typename NodeT>
+ast::Expression MakeExpression(NodeT node, token::SourceSpan span) {
+  ast::Expression expression;
+  expression.node = std::move(node);
+  expression.span = span;
+  return expression;
+}
+
+template <typename NodeT>
+ast::Statement MakeStatement(NodeT node, token::SourceSpan span) {
+  ast::Statement statement;
+  statement.node = std::move(node);
+  statement.span = span;
+  return statement;
+}
+
+inline token::SourceSpan SpanFromStatements(
+    const std::vector<ast::Statement>& statements,
+    token::SourceSpan fallback = {}) {
+  if (statements.empty()) {
+    return fallback;
   }
+
+  return token::MergeSourceSpans(statements.front().span, statements.back().span);
 }
 
 inline const std::unordered_map<token::TokenKind, int> kBinOpsPrecedences = {
@@ -112,35 +127,72 @@ inline const std::unordered_map<token::TokenKind, ast::BinaryOperator>
 };
 
 inline value::LualikeValue TokenToValue(const token::Token& token) {
-  switch (token.token_kind) {
-    case token::TokenKind::kStringLiteral: {
-      const std::string_view data = token.source_span;
-      return {std::string(data.substr(1, data.length() - 2))};
+  try {
+    switch (token.token_kind) {
+      case token::TokenKind::kStringLiteral: {
+        const std::string_view data = token.source_span;
+        return {std::string(data.substr(1, data.length() - 2))};
+      }
+
+      case token::TokenKind::kIntLiteral:
+        return {std::stoi(std::string(token.source_span))};
+
+      case token::TokenKind::kFloatLiteral:
+        return {std::stod(std::string(token.source_span))};
+
+      case token::TokenKind::kName:
+        return {std::string(token.source_span)};
+
+      case token::TokenKind::kKeywordTrue:
+        return {true};
+
+      case token::TokenKind::kKeywordFalse:
+        return {false};
+
+      case token::TokenKind::kKeywordNil:
+        return {};
+
+      default:
+        throw MakeParserError(
+            std::format(
+                "Unexpected token encountered during TokenToValue: kind {}",
+                static_cast<int>(token.token_kind)),
+            token.span);
     }
-
-    case token::TokenKind::kIntLiteral:
-      return {std::stoi(std::string(token.source_span))};
-
-    case token::TokenKind::kFloatLiteral:
-      return {std::stod(std::string(token.source_span))};
-
-    case token::TokenKind::kName:
-      return {std::string(token.source_span)};
-
-    case token::TokenKind::kKeywordTrue:
-      return {true};
-
-    case token::TokenKind::kKeywordFalse:
-      return {false};
-
-    case token::TokenKind::kKeywordNil:
-      return {};
-
-    default:
-      throw ParserErr(std::format(
-          "Unexpected token encountered during TokenToValue: kind {}",
-          static_cast<int>(token.token_kind)));
+  } catch (const error::Error&) {
+    throw;
+  } catch (...) {
+    throw error::Error::FromCurrentException("Failed to parse literal value",
+                                             token.span);
   }
+}
+
+inline std::expected<ast::Program, error::Error> ParseSourceView(
+    std::string_view input) noexcept {
+  try {
+    Parser<std::string_view> parser(input);
+    return parser.Parse();
+  } catch (error::Error& err) {
+    return std::unexpected(std::move(err));
+  } catch (const std::exception&) {
+    return std::unexpected(
+        error::Error::FromCurrentException("Internal parser error"));
+  } catch (...) {
+    return std::unexpected(error::Error::Message("Unknown parser error"));
+  }
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::contiguous_range<InputT>
+std::expected<ast::Program, error::Error> Parse(InputT input) noexcept {
+  std::string source(std::ranges::cbegin(input), std::ranges::cend(input));
+  auto parse_result = ParseSourceView(source);
+  if (!parse_result) {
+    return std::unexpected(
+        std::move(parse_result).error().AttachSourceText(std::move(source)));
+  }
+
+  return parse_result;
 }
 
 template <std::ranges::view InputT>
@@ -160,6 +212,7 @@ ast::Program Parser<InputT>::Parse() {
     stmts.push_back(ParseStmt());
   }
 
+  program.span = SpanFromStatements(program.statements, CurrentCursorSpan());
   return program;
 }
 
@@ -171,9 +224,34 @@ bool Parser<InputT>::IsEOF() const {
 
 template <std::ranges::view InputT>
   requires std::ranges::contiguous_range<InputT>
+token::SourceSpan Parser<InputT>::CurrentCursorSpan() const {
+  if (current_token_) {
+    return current_token_->span;
+  }
+  if (previous_token_) {
+    return {previous_token_->span.end, previous_token_->span.end};
+  }
+
+  return {};
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::contiguous_range<InputT>
+token::SourceSpan Parser<InputT>::SpanFrom(
+    const token::Token& start_token) const {
+  if (previous_token_) {
+    return token::MergeSourceSpans(start_token.span, previous_token_->span);
+  }
+
+  return start_token.span;
+}
+
+template <std::ranges::view InputT>
+  requires std::ranges::contiguous_range<InputT>
 const token::Token& Parser<InputT>::Peek() const {
   if (IsEOF()) {
-    throw ParserErr("Unexpected end of file encountered");
+    throw MakeParserError("Unexpected end of file encountered",
+                          CurrentCursorSpan());
   }
 
   return *current_token_;
@@ -183,10 +261,12 @@ template <std::ranges::view InputT>
   requires std::ranges::contiguous_range<InputT>
 token::Token Parser<InputT>::Advance() {
   if (IsEOF()) {
-    throw ParserErr("Unexpected end of file encountered while advancing");
+    throw MakeParserError("Unexpected end of file encountered while advancing",
+                          CurrentCursorSpan());
   }
 
   auto token = *current_token_;
+  previous_token_ = token;
   current_token_ = lexer_.NextToken();
   return token;
 }
@@ -196,10 +276,11 @@ template <std::ranges::view InputT>
 token::Token Parser<InputT>::Consume(token::TokenKind kind) {
   const auto& token = Peek();
   if (token.token_kind != kind) {
-    throw ParserErr(std::format(
-        "Unexpected token expected kind {} but got {} with value {}",
-        static_cast<int>(kind), static_cast<int>(token.token_kind),
-        token.source_span));
+    throw MakeParserError(
+        std::format("Unexpected token expected kind {} but got {} with value {}",
+                    static_cast<int>(kind), static_cast<int>(token.token_kind),
+                    token.source_span),
+        token.span);
   }
 
   return Advance();
@@ -222,17 +303,18 @@ ast::Statement Parser<InputT>::ParseStmt() {
   while (Match(token::TokenKind::kOtherSemicolon)) {
   }
 
-  switch (Peek().token_kind) {
+  const auto start_token = Peek();
+  switch (start_token.token_kind) {
     case token::TokenKind::kName:
-      return {ParseVarDecl(false)};
+      return MakeStatement(ParseVarDecl(false), SpanFrom(start_token));
     case token::TokenKind::kKeywordReturn:
-      return {ParseRetStmt()};
+      return MakeStatement(ParseRetStmt(), SpanFrom(start_token));
     case token::TokenKind::kKeywordLocal:
-      return {ParseVarDecl(true)};
+      return MakeStatement(ParseVarDecl(true), SpanFrom(start_token));
     case token::TokenKind::kKeywordIf:
-      return {ParseIfStmt()};
+      return MakeStatement(ParseIfStmt(), SpanFrom(start_token));
     default:
-      return {ParseExprStmt()};
+      return MakeStatement(ParseExprStmt(), SpanFrom(start_token));
   }
 }
 
@@ -306,6 +388,7 @@ ast::Block Parser<InputT>::ParseBlock(
     block.statements.push_back(ParseStmt());
   }
 
+  block.span = SpanFromStatements(block.statements, CurrentCursorSpan());
   return block;
 }
 
@@ -333,11 +416,13 @@ ast::Expression Parser<InputT>::ParseExpr(int min_precedence) {
         op_token.token_kind == token::TokenKind::kOtherCaret ? precedence
                                                              : precedence + 1;
     auto rhs = ParseExpr(next_precedence);
+    const auto expression_span = token::MergeSourceSpans(lhs.span, rhs.span);
 
-    lhs.node = ast::BinaryExpression{
-        kTokenToBinOp.at(op_token.token_kind),
-        std::make_unique<ast::Expression>(std::move(lhs)),
-        std::make_unique<ast::Expression>(std::move(rhs))};
+    lhs = MakeExpression(ast::BinaryExpression{
+                             kTokenToBinOp.at(op_token.token_kind),
+                             std::make_unique<ast::Expression>(std::move(lhs)),
+                             std::make_unique<ast::Expression>(std::move(rhs))},
+                         expression_span);
   }
 
   return lhs;
@@ -355,10 +440,12 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
     case token::TokenKind::kKeywordTrue:
     case token::TokenKind::kKeywordFalse:
     case token::TokenKind::kKeywordNil:
-      return {{ast::LiteralExpression{TokenToValue(token)}}};
+      return MakeExpression(ast::LiteralExpression{TokenToValue(token)},
+                            token.span);
 
     case token::TokenKind::kName:
-      return {{ast::VariableExpression{std::string(token.source_span)}}};
+      return MakeExpression(ast::VariableExpression{std::string(token.source_span)},
+                            token.span);
 
     case token::TokenKind::kOtherMinus:
     case token::TokenKind::kKeywordNot: {
@@ -366,20 +453,27 @@ ast::Expression Parser<InputT>::ParsePrimExpr() {
       const auto oper = token.token_kind == token::TokenKind::kOtherMinus
                             ? ast::UnaryOperator::kNegate
                             : ast::UnaryOperator::kNot;
-      return {{ast::UnaryExpression{oper, std::make_unique<ast::Expression>(
-                                              ParseExpr(kUnaryPrecedence))}}};
+      auto rhs = ParseExpr(kUnaryPrecedence);
+      const auto expression_span = token::MergeSourceSpans(token.span, rhs.span);
+      return MakeExpression(ast::UnaryExpression{
+                                oper,
+                                std::make_unique<ast::Expression>(
+                                    std::move(rhs))},
+                            expression_span);
     }
 
     case token::TokenKind::kOtherLeftParenthesis: {
       auto expr = ParseExpr();
-      Consume(token::TokenKind::kOtherRightParenthesis);
+      const auto right_paren = Consume(token::TokenKind::kOtherRightParenthesis);
+      expr.span = token::MergeSourceSpans(token.span, right_paren.span);
       return expr;
     }
 
     default:
-      throw ParserErr(
+      throw MakeParserError(
           std::format("Expected expression but found token {} with value {}",
-                      static_cast<int>(token.token_kind), token.source_span));
+                      static_cast<int>(token.token_kind), token.source_span),
+          token.span);
   }
 }
 

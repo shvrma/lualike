@@ -2,7 +2,6 @@
 #define LUALIKE_INTERPRETER_H_
 
 #include <cstdint>
-#include <exception>
 #include <expected>
 #include <format>
 #include <memory>
@@ -15,7 +14,7 @@
 #include <variant>
 
 #include "lualike/ast.h"
-#include "lualike/lexer.h"
+#include "lualike/error.h"
 #include "lualike/parser.h"
 #include "lualike/value.h"
 
@@ -60,11 +59,33 @@ class Scope {
   }
 };
 
+inline error::Error MakeInterpreterError(
+    std::string message,
+    std::optional<token::SourceSpan> context_span = std::nullopt,
+    std::optional<error::CallStack> call_stack = std::nullopt) {
+  return error::Error::Context(std::move(message), context_span,
+                               std::move(call_stack));
+}
+
+template <typename ResultT, typename CallbackT>
+ResultT ExecuteWithForeignExceptionContext(
+    const std::string& message, token::SourceSpan context_span,
+    CallbackT&& callback) {
+  try {
+    return std::forward<CallbackT>(callback)();
+  } catch (const error::Error&) {
+    throw;
+  } catch (...) {
+    throw error::Error::FromCurrentException(message, context_span);
+  }
+}
+
 template <typename ExprT>
-value::LualikeValue ExprVisitor(const ExprT& expr,
+value::LualikeValue ExprVisitor(const ExprT& expr, token::SourceSpan span,
                                 std::shared_ptr<Scope> scope);
 template <typename StmtT>
 std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt,
+                                               token::SourceSpan span,
                                                std::shared_ptr<Scope> scope);
 
 static bool IsTruthy(const value::LualikeValue& value);
@@ -76,57 +97,48 @@ std::optional<value::LualikeValue> VisitStatement(
 std::optional<value::LualikeValue> VisitBlock(const ast::Block& block,
                                               std::shared_ptr<Scope> scope);
 
-struct InterpreterErr : std::runtime_error {
-  std::exception_ptr internal_exception;
-
-  explicit InterpreterErr(const std::string& msg) : std::runtime_error(msg) {}
-
-  explicit InterpreterErr() noexcept
-      : std::runtime_error("Internal interpreter error"),
-        internal_exception(std::current_exception()) {}
-
-  explicit InterpreterErr(const lexer::LexerErr& lexer_err) noexcept
-      : std::runtime_error("Syntax error in input"),
-        internal_exception(std::make_exception_ptr(lexer_err)) {}
-
-  explicit InterpreterErr(const parser::ParserErr& parser_err) noexcept
-      : std::runtime_error("Parser error in input"),
-        internal_exception(std::make_exception_ptr(parser_err)) {}
-};
-
 template <std::ranges::view InputT>
   requires std::ranges::random_access_range<InputT>
-std::expected<std::optional<value::LualikeValue>, InterpreterErr> Interpret(
+std::expected<std::optional<value::LualikeValue>, error::Error> Interpret(
     InputT input) noexcept {
+  std::string source(std::ranges::cbegin(input), std::ranges::cend(input));
+
   try {
-    auto parse_result = parser::Parse(input);
+    auto parse_result = parser::ParseSourceView(source);
     if (!parse_result) {
-      return std::unexpected(InterpreterErr(parse_result.error()));
+      return std::unexpected(
+          std::move(parse_result).error().AttachSourceText(std::move(source)));
     }
 
     return VisitBlock(parse_result.value(), std::make_shared<Scope>());
-  } catch (const InterpreterErr& err) {
-    return std::unexpected(err);
-  } catch (const lexer::LexerErr& err) {
-    return std::unexpected(InterpreterErr(err));
-  } catch (const std::exception& exception) {
-    return std::unexpected(InterpreterErr());
+  } catch (error::Error& err) {
+    return std::unexpected(std::move(err).AttachSourceText(std::move(source)));
+  } catch (const std::exception&) {
+    return std::unexpected(
+        error::Error::FromCurrentException("Internal interpreter error")
+            .AttachSourceText(std::move(source)));
   } catch (...) {
-    return std::unexpected(InterpreterErr());
+    return std::unexpected(
+        error::Error::Message("Unknown interpreter error")
+            .AttachSourceText(std::move(source)));
   }
 }
 
 inline value::LualikeValue VisitExpression(const ast::Expression& expression,
                                            std::shared_ptr<Scope> scope) {
   return std::visit(
-      [scope](const auto& expr) { return ExprVisitor(expr, scope); },
+      [&expression, scope](const auto& expr) {
+        return ExprVisitor(expr, expression.span, scope);
+      },
       expression.node);
 }
 
 inline std::optional<value::LualikeValue> VisitStatement(
     const ast::Statement& statement, std::shared_ptr<Scope> scope) {
   return std::visit(
-      [scope](const auto& stmt) { return StmtVisitor(stmt, scope); },
+      [&statement, scope](const auto& stmt) {
+        return StmtVisitor(stmt, statement.span, scope);
+      },
       statement.node);
 }
 
@@ -155,7 +167,7 @@ inline bool IsTruthy(const value::LualikeValue& value) {
 }
 
 template <typename ExprT>
-value::LualikeValue ExprVisitor(const ExprT& expr,
+value::LualikeValue ExprVisitor(const ExprT& expr, token::SourceSpan span,
                                 std::shared_ptr<Scope> scope) {
   using T = std::decay_t<decltype(expr)>;
 
@@ -168,7 +180,8 @@ value::LualikeValue ExprVisitor(const ExprT& expr,
       return val.value();
     }
 
-    throw InterpreterErr(std::format("Unknown variable: '{}'", expr.name));
+    throw MakeInterpreterError(std::format("Unknown variable: '{}'", expr.name),
+                               span);
   }
 
   else if constexpr (std::is_same_v<T, ast::UnaryExpression>) {
@@ -176,12 +189,16 @@ value::LualikeValue ExprVisitor(const ExprT& expr,
 
     switch (expr.op) {
       case ast::UnaryOperator::kNegate:
-        return -rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate unary negation", span,
+            [&rhs] { return -rhs; });
       case ast::UnaryOperator::kNot:
-        return !rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate logical negation", span,
+            [&rhs] { return !rhs; });
     }
 
-    throw InterpreterErr("Unimplemented unary operator");
+    throw MakeInterpreterError("Unimplemented unary operator", span);
   }
 
   else if constexpr (std::is_same_v<T, ast::BinaryExpression>) {
@@ -198,21 +215,37 @@ value::LualikeValue ExprVisitor(const ExprT& expr,
 
     switch (expr.op) {
       case ast::BinaryOperator::kAdd:
-        return lhs + rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate addition", span,
+            [&lhs, &rhs] { return lhs + rhs; });
       case ast::BinaryOperator::kSubtract:
-        return lhs - rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate subtraction", span,
+            [&lhs, &rhs] { return lhs - rhs; });
       case ast::BinaryOperator::kMultiply:
-        return lhs * rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate multiplication", span,
+            [&lhs, &rhs] { return lhs * rhs; });
       case ast::BinaryOperator::kDivide:
-        return lhs / rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate division", span,
+            [&lhs, &rhs] { return lhs / rhs; });
       case ast::BinaryOperator::kFloorDivide:
-        lhs.FloorDivideAndAssign(rhs);
-        return lhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate floor division", span, [&lhs, &rhs] {
+              lhs.FloorDivideAndAssign(rhs);
+              return lhs;
+            });
       case ast::BinaryOperator::kModulo:
-        return lhs % rhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate modulo", span,
+            [&lhs, &rhs] { return lhs % rhs; });
       case ast::BinaryOperator::kPower:
-        lhs.ExponentiateAndAssign(rhs);
-        return lhs;
+        return ExecuteWithForeignExceptionContext<value::LualikeValue>(
+            "Failed to evaluate exponentiation", span, [&lhs, &rhs] {
+              lhs.ExponentiateAndAssign(rhs);
+              return lhs;
+            });
       case ast::BinaryOperator::kEqual:
         return {lhs == rhs};
       case ast::BinaryOperator::kNotEqual:
@@ -230,14 +263,15 @@ value::LualikeValue ExprVisitor(const ExprT& expr,
         break;
     }
 
-    throw InterpreterErr("Unimplemented binary operator");
+    throw MakeInterpreterError("Unimplemented binary operator", span);
   }
 
-  throw InterpreterErr("Unimplemented expression type");
+  throw MakeInterpreterError("Unimplemented expression type", span);
 }
 
 template <typename StmtT>
 std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt,
+                                               token::SourceSpan span,
                                                std::shared_ptr<Scope> scope) {
   using T = std::decay_t<decltype(stmt)>;
 
@@ -256,8 +290,8 @@ std::optional<value::LualikeValue> StmtVisitor(const StmtT& stmt,
     if (const auto var_value = scope->Get(stmt.variable.name)) {
       scope->Set(stmt.variable.name, value);
     } else {
-      throw InterpreterErr(
-          std::format("Unknown variable: '{}'", stmt.variable.name));
+      throw MakeInterpreterError(
+          std::format("Unknown variable: '{}'", stmt.variable.name), span);
     }
   }
 

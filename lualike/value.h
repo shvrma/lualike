@@ -23,11 +23,37 @@ enum class LualikeValueOpErrKind : uint8_t {
   kRhsNotBool,
 };
 
+inline const char* LualikeValueOpErrKindToString(
+    LualikeValueOpErrKind error_kind) noexcept {
+  switch (error_kind) {
+    case LualikeValueOpErrKind::kNotNumericOperand:
+      return "operand is not numeric";
+    case LualikeValueOpErrKind::kNotBoolOperand:
+      return "operand is not boolean";
+    case LualikeValueOpErrKind::kNormallyImpossibleErr:
+      return "unexpected value operation error";
+    case LualikeValueOpErrKind::kLhsNotNumeric:
+      return "left-hand side is not numeric";
+    case LualikeValueOpErrKind::kLhsNotBool:
+      return "left-hand side is not boolean";
+    case LualikeValueOpErrKind::kRhsNotNumeric:
+      return "right-hand side is not numeric";
+    case LualikeValueOpErrKind::kRhsNotBool:
+      return "right-hand side is not boolean";
+  }
+
+  return "unknown value operation error";
+}
+
 struct LualikeValueOpErr : std::exception {
   LualikeValueOpErrKind error_kind;
 
   explicit LualikeValueOpErr(LualikeValueOpErrKind error_kind) noexcept
       : error_kind(error_kind) {}
+
+  const char* what() const noexcept override {
+    return LualikeValueOpErrKindToString(error_kind);
+  }
 };
 
 struct LualikeValue;

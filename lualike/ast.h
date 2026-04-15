@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "lualike/token.h"
 #include "lualike/value.h"
 
 namespace lualike::ast {
@@ -64,6 +65,7 @@ struct Expression {
   std::variant<LiteralExpression, VariableExpression, UnaryExpression,
                BinaryExpression, FunctionCallExpression>
       node;
+  token::SourceSpan span;
 };
 
 struct ExpressionStatement {
@@ -100,10 +102,12 @@ struct Statement {
   std::variant<ExpressionStatement, ReturnStatement, VariableDeclaration,
                Assignment, IfStatement, FunctionDeclaration>
       node;
+  token::SourceSpan span;
 };
 
 struct Block {
   std::vector<Statement> statements;
+  token::SourceSpan span;
 };
 
 using Program = Block;

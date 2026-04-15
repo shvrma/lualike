@@ -52,6 +52,7 @@ int main() {
 
   if (!result) {
     std::cerr << "Error: " << result.error().what() << "\n";
+    std::cerr << result.error().RenderPretty() << "\n";
     return 1;
   }
 
