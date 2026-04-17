@@ -10,10 +10,18 @@
 
 namespace lualike::interpreter {
 
+namespace {
+
+std::string RenderErrorForTest(const error::Error& err) {
+  return err.HasSourceText() ? err.RenderPretty() : err.RenderPlain();
+}
+
+}  // namespace
+
 MATCHER_P(LualikeEvaluatesTo, expected_value, "") {
   const auto eval_result = interpreter::Interpret(std::string_view{arg});
   if (!eval_result.has_value()) {
-    *result_listener << eval_result.error().what();
+    *result_listener << RenderErrorForTest(eval_result.error());
     return false;
   }
   if (!eval_result->has_value()) {
@@ -29,7 +37,7 @@ MATCHER_P(LualikeEvaluatesTo, expected_value, "") {
 MATCHER(LualikeRunsSuccessfully, "") {
   const auto eval_result = interpreter::Interpret(std::string_view{arg});
   if (!eval_result.has_value()) {
-    *result_listener << eval_result.error().what();
+    *result_listener << RenderErrorForTest(eval_result.error());
     return false;
   }
   if (eval_result->has_value()) {
@@ -83,9 +91,26 @@ TEST(InterpreterTest, InterpretValidProgramsTest) {
 TEST(InterpreterTest, ReadsFromInputStream) {
   std::istringstream input("return 2 + 5");
   const auto eval_result = interpreter::Interpret(input);
-  ASSERT_TRUE(eval_result.has_value()) << eval_result.error().what();
+  ASSERT_TRUE(eval_result.has_value()) << RenderErrorForTest(eval_result.error());
   ASSERT_TRUE(eval_result->has_value());
   EXPECT_EQ(eval_result->value(), lualike::value::LualikeValue{7});
+}
+
+TEST(InterpreterTest, RejectsTrailingTokensAfterReturn) {
+  const auto eval_result = interpreter::Interpret("return 2 whatever");
+  ASSERT_FALSE(eval_result.has_value());
+  EXPECT_THAT(eval_result.error().what(),
+              testing::HasSubstr("Unexpected token after return statement"));
+}
+
+TEST(InterpreterTest, PrettyErrorHighlightsUnknownVariable) {
+  const auto eval_result = interpreter::Interpret("return 2 + 5 + whatever");
+  ASSERT_FALSE(eval_result.has_value());
+
+  const auto pretty = eval_result.error().RenderPretty();
+  EXPECT_THAT(pretty, testing::HasSubstr("Unknown variable: 'whatever'"));
+  EXPECT_THAT(pretty, testing::HasSubstr("return 2 + 5 + whatever"));
+  EXPECT_THAT(pretty, testing::HasSubstr("^^^^^^^^"));
 }
 
 }  // namespace lualike::interpreter

@@ -10,10 +10,18 @@
 
 using lualike::parser::Parse;
 
+namespace {
+
+std::string RenderErrorForTest(const lualike::error::Error& err) {
+  return err.HasSourceText() ? err.RenderPretty() : err.RenderPlain();
+}
+
+}  // namespace
+
 MATCHER_P(LualikeParsesToAstDump, expected_dump, "") {
   const auto actual_ast = Parse(std::string_view{arg});
   if (!actual_ast.has_value()) {
-    *result_listener << actual_ast.error().what();
+    *result_listener << RenderErrorForTest(actual_ast.error());
     return false;
   }
 
@@ -68,11 +76,18 @@ TEST(ParserTest, IfStatement) {
 TEST(ParserTest, ReadsFromInputStream) {
   std::istringstream input("return 1 + 2");
   const auto actual_ast = Parse(input);
-  ASSERT_TRUE(actual_ast.has_value()) << actual_ast.error().what();
+  ASSERT_TRUE(actual_ast.has_value()) << RenderErrorForTest(actual_ast.error());
   EXPECT_EQ(lualike::ast::ToString(actual_ast.value()), R"(Block
   ReturnStatement
     BinaryExpression: +
       LiteralExpression: Number <1>
       LiteralExpression: Number <2>
 )");
+}
+
+TEST(ParserTest, RejectsTrailingTokensAfterReturn) {
+  const auto actual_ast = Parse(std::string_view{"return 1 whatever"});
+  ASSERT_FALSE(actual_ast.has_value());
+  EXPECT_THAT(actual_ast.error().what(),
+              testing::HasSubstr("Unexpected token after return statement"));
 }

@@ -73,6 +73,11 @@ class Parser {
   bool IsEOF() const;
   token::SourceSpan CurrentCursorSpan() const;
   token::SourceSpan SpanFrom(const token::Token& start_token) const;
+  bool IsAtAnyOf(std::initializer_list<token::TokenKind> token_kinds) const;
+  bool IsBlockTerminatedBy(const ast::Statement& statement) const;
+  void ConsumeOptionalSemicolons();
+  void EnsureBlockEndsAfterReturn(
+      std::initializer_list<token::TokenKind> end_tokens = {});
   const token::Token& Peek() const;
   token::Token Advance();
   token::Token Consume(token::TokenKind kind);
@@ -245,14 +250,19 @@ inline ast::Program Parser::Parse() {
   auto& stmts = program.statements;
 
   while (!IsEOF()) {
-    while (Match(token::TokenKind::kOtherSemicolon)) {
-    }
+    ConsumeOptionalSemicolons();
 
     if (IsEOF()) {
       break;
     }
 
-    stmts.push_back(ParseStmt());
+    auto statement = ParseStmt();
+    const bool terminates_program = IsBlockTerminatedBy(statement);
+    stmts.push_back(std::move(statement));
+    if (terminates_program) {
+      EnsureBlockEndsAfterReturn();
+      break;
+    }
   }
 
   program.span = SpanFromStatements(program.statements, CurrentCursorSpan());
@@ -279,6 +289,31 @@ inline token::SourceSpan Parser::SpanFrom(
   }
 
   return start_token.span;
+}
+
+inline bool Parser::IsAtAnyOf(
+    std::initializer_list<token::TokenKind> token_kinds) const {
+  return !IsEOF() &&
+         std::ranges::find(token_kinds, Peek().token_kind) != token_kinds.end();
+}
+
+inline bool Parser::IsBlockTerminatedBy(const ast::Statement& statement) const {
+  return std::holds_alternative<ast::ReturnStatement>(statement.node);
+}
+
+inline void Parser::ConsumeOptionalSemicolons() {
+  while (Match(token::TokenKind::kOtherSemicolon)) {
+  }
+}
+
+inline void Parser::EnsureBlockEndsAfterReturn(
+    std::initializer_list<token::TokenKind> end_tokens) {
+  ConsumeOptionalSemicolons();
+  if (IsEOF() || IsAtAnyOf(end_tokens)) {
+    return;
+  }
+
+  throw MakeParserError("Unexpected token after return statement", Peek().span);
 }
 
 inline const token::Token& Parser::Peek() const {
@@ -326,8 +361,7 @@ inline bool Parser::Match(token::TokenKind kind) {
 }
 
 inline ast::Statement Parser::ParseStmt() {
-  while (Match(token::TokenKind::kOtherSemicolon)) {
-  }
+  ConsumeOptionalSemicolons();
 
   const auto start_token = Peek();
   switch (start_token.token_kind) {
@@ -393,17 +427,20 @@ inline ast::Block Parser::ParseBlock(
     std::initializer_list<token::TokenKind> end_tokens) {
   ast::Block block;
 
-  while (!IsEOF() &&
-         std::ranges::find(end_tokens, Peek().token_kind) == end_tokens.end()) {
-    while (Match(token::TokenKind::kOtherSemicolon)) {
-    }
+  while (!IsEOF() && !IsAtAnyOf(end_tokens)) {
+    ConsumeOptionalSemicolons();
 
-    if (IsEOF() ||
-        std::ranges::find(end_tokens, Peek().token_kind) != end_tokens.end()) {
+    if (IsEOF() || IsAtAnyOf(end_tokens)) {
       break;
     }
 
-    block.statements.push_back(ParseStmt());
+    auto statement = ParseStmt();
+    const bool terminates_block = IsBlockTerminatedBy(statement);
+    block.statements.push_back(std::move(statement));
+    if (terminates_block) {
+      EnsureBlockEndsAfterReturn(end_tokens);
+      break;
+    }
   }
 
   block.span = SpanFromStatements(block.statements, CurrentCursorSpan());
